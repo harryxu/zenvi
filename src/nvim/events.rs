@@ -240,6 +240,25 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) {
                     state.title = title.to_string();
                 }
             }
+            "option_set" => {
+                if args.len() >= 2 {
+                    if let Some(opt_name) = args[0].as_str() {
+                        match opt_name {
+                            "guifont" => {
+                                if let Some(val) = args[1].as_str() {
+                                    state.guifont = val.to_string();
+                                }
+                            }
+                            "linespace" => {
+                                if let Some(val) = args[1].as_i64() {
+                                    state.linespace = val;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
             "flush" => {
                 // Redraw batch completed
             }

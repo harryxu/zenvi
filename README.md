@@ -11,7 +11,29 @@ A modern, standalone, GPU-accelerated **Neovim GUI frontend** built in Rust with
 - **📂 External Drag & Drop**: Drag any file or folder from Finder / file manager into the Zenvi window to immediately open and edit it (`:edit <path>`).
 - **⌨️ Rich Keyboard Mapping**: Full support for Neovim key sequences (`<Esc>`, `<CR>`, `<C-w>`, `<M-x>`, `<D-s>`, arrow keys, function keys, and more).
 - **📐 Dynamic Resizing**: Automatically computes optimal cols/rows based on window dimensions and updates Neovim grid size in real time.
+- **🔤 Native `guifont` Support**: Configure font family and font size natively in `init.lua` via `vim.opt.guifont = "JetBrainsMono Nerd Font:h15"`. Zenvi also injects `vim.g.zenvi = true` and `vim.g.gui_running = 1` before `init.lua` loads.
 - **🎨 Native Status Bar**: Displays current mode (NORMAL, INSERT, VISUAL, etc.) and cursor position.
+
+---
+
+## ⚙️ Configuration (in `init.lua`)
+
+Zenvi sets `vim.g.zenvi = true` and `vim.g.gui_running = 1` upon startup. You can configure your GUI font and line spacing directly in your Neovim configuration (`~/.config/nvim/init.lua`):
+
+```lua
+if vim.g.zenvi then
+  -- Set font family and font size
+  vim.opt.guifont = "JetBrainsMono Nerd Font:h15"
+  
+  -- Optional: add extra pixel line spacing
+  vim.opt.linespace = 2
+end
+```
+
+You can also change fonts dynamically at runtime inside Neovim:
+```vim
+:set guifont=Fira_Code:h16
+```
 
 ---
 
@@ -52,5 +74,6 @@ src/
 │   └── state.rs     # Screen grid buffer, highlights & mode state
 └── ui/
     ├── mod.rs       # ZenviView root view, status bar & drag-and-drop handler
+    ├── font.rs      # Neovim guifont & linespace parser
     └── grid.rs      # High-performance grid text & cell span renderer
 ```

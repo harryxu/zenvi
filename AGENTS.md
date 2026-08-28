@@ -38,6 +38,7 @@
     │   └── state.rs         # In-memory screen grid buffers, highlight lookup table, cursor & mode state
     └── ui/
         ├── mod.rs           # ZenviView (Root view, custom macOS titlebar, status bar, mouse events, drag-and-drop)
+        ├── font.rs          # Neovim guifont & linespace parser and font metrics calculator
         └── grid.rs          # High-performance grid text & cell span renderer
 ```
 
@@ -105,5 +106,5 @@ When extending Zenvi, follow these best practices:
 
 * [ ] **Multigrid Support (`ext_multigrid`):** Render floating windows (LSP hover, Telescope, autocomplete) as separate GPUI layers with native drop shadows and rounded corners.
 * [ ] **Smooth Cursor Animation:** Add spring-based pixel interpolation for cursor movement between cells.
-* [ ] **Font Configuration:** Allow setting custom font family and font size via command line or config file.
+* [x] **Font Configuration:** Native `guifont` & `linespace` option parsing (`vim.opt.guifont = "..."`), with `vim.g.zenvi` / `vim.g.gui_running` flags.
 * [ ] **Native Popup Menu (`ext_popupmenu`):** Render completion menu as native GPUI popups.

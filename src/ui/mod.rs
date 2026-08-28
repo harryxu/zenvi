@@ -1,7 +1,9 @@
+pub mod font;
 pub mod grid;
 
 use crate::input::key_event_to_nvim;
 use crate::nvim::process::NvimSession;
+use font::parse_guifont;
 use gpui::*;
 use std::sync::Arc;
 
@@ -25,11 +27,14 @@ fn mods_to_nvim(mods: &Modifiers) -> String {
 pub struct ZenviView {
     pub session: Arc<NvimSession>,
     pub focus_handle: FocusHandle,
+    pub font_family: String,
     pub font_size: Pixels,
     pub line_height: Pixels,
     pub char_width: f32,
     pub last_cols: usize,
     pub last_rows: usize,
+    pub last_guifont: String,
+    pub last_linespace: i64,
     pub is_mouse_down: bool,
     pub scroll_accum_y: f32,
 }
@@ -45,14 +50,43 @@ impl ZenviView {
         Self {
             session,
             focus_handle,
+            font_family: "Menlo".to_string(),
             font_size: px(14.0),
             line_height: px(20.0),
             char_width: 8.42,
             last_cols: 100,
             last_rows: 35,
+            last_guifont: String::new(),
+            last_linespace: 0,
             is_mouse_down: false,
             scroll_accum_y: 0.0,
         }
+    }
+
+    fn update_font(&mut self, guifont: &str, linespace: i64) {
+        let parsed = parse_guifont(guifont);
+
+        if let Some(family) = parsed.family {
+            self.font_family = family;
+        } else if guifont.is_empty() {
+            self.font_family = "Menlo".to_string();
+        }
+
+        let size: f32 = if let Some(s) = parsed.size {
+            s
+        } else if guifont.is_empty() {
+            14.0
+        } else {
+            self.font_size.into()
+        };
+
+        self.font_size = px(size);
+        self.char_width = size * 0.6015;
+
+        // Line height calculation: base 1.428 multiplier + linespace pixels
+        let base_lh = (size * 1.428).round();
+        let final_lh = (base_lh + linespace as f32).max(8.0);
+        self.line_height = px(final_lh);
     }
 
     fn pos_to_grid(&self, pos: Point<Pixels>) -> (usize, usize) {
@@ -62,9 +96,10 @@ impl ZenviView {
         // Titlebar height: 32.0, Grid padding: 4.0
         let top_offset = 36.0;
         let left_offset = 4.0;
+        let lh: f32 = self.line_height.into();
 
         let col = ((x - left_offset) / self.char_width).floor().max(0.0) as usize;
-        let row = ((y - top_offset) / 20.0).floor().max(0.0) as usize;
+        let row = ((y - top_offset) / lh).floor().max(0.0) as usize;
 
         (
             col.min(self.last_cols.saturating_sub(1)),
@@ -75,6 +110,21 @@ impl ZenviView {
 
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (guifont_changed, new_guifont, new_linespace) = {
+            let state = self.session.state.read();
+            if state.guifont != self.last_guifont || state.linespace != self.last_linespace {
+                (true, state.guifont.clone(), state.linespace)
+            } else {
+                (false, String::new(), 0)
+            }
+        };
+
+        if guifont_changed {
+            self.last_guifont = new_guifont.clone();
+            self.last_linespace = new_linespace;
+            self.update_font(&new_guifont, new_linespace);
+        }
+
         let state = self.session.state.read();
         let default_bg = state.default_bg;
         let current_mode = state.current_mode.to_uppercase();
@@ -98,9 +148,10 @@ impl Render for ZenviView {
         let top_offset = 32.0;
         let bottom_offset = 24.0;
         let padding_y = 8.0;
+        let lh: f32 = self.line_height.into();
 
         let cols = ((window_w - 16.0) / self.char_width).floor().max(20.0) as usize;
-        let rows = ((window_h - top_offset - bottom_offset - padding_y) / 20.0).floor().max(5.0) as usize;
+        let rows = ((window_h - top_offset - bottom_offset - padding_y) / lh).floor().max(5.0) as usize;
 
         if cols != self.last_cols || rows != self.last_rows {
             self.last_cols = cols;
@@ -108,7 +159,13 @@ impl Render for ZenviView {
             self.session.try_resize(cols, rows);
         }
 
-        let grid_element = grid::render_grid(&state, &grid, self.font_size, self.line_height);
+        let grid_element = grid::render_grid(
+            &state,
+            &grid,
+            &self.font_family,
+            self.font_size,
+            self.line_height,
+        );
 
         // Status bar colors based on mode
         let mode_bg = match current_mode.as_str() {

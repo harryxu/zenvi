@@ -27,6 +27,8 @@ impl NvimSession {
     pub fn spawn(event_tx: mpsc::UnboundedSender<NvimEvent>) -> Result<Arc<Self>> {
         let mut child = Command::new("nvim")
             .arg("--embed")
+            .arg("--cmd")
+            .arg("let g:zenvi = v:true | let g:gui_running = 1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

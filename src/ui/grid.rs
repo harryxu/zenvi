@@ -14,6 +14,7 @@ pub struct CellSpan {
 pub fn render_grid(
     state: &NvimState,
     grid: &Grid,
+    font_family: &str,
     font_size: Pixels,
     line_height: Pixels,
 ) -> impl IntoElement {
@@ -105,7 +106,7 @@ pub fn render_grid(
     div()
         .flex()
         .flex_col()
-        .font_family("Menlo")
+        .font_family(font_family.to_string())
         .text_size(font_size)
         .line_height(line_height)
         .bg(rgb(default_bg))

@@ -149,6 +149,8 @@ pub struct NvimState {
     pub mode_info: Vec<ModeInfo>,
     pub current_mode_idx: usize,
     pub title: String,
+    pub guifont: String,
+    pub linespace: i64,
 }
 
 impl Default for NvimState {
@@ -166,6 +168,8 @@ impl Default for NvimState {
             mode_info: Vec::new(),
             current_mode_idx: 0,
             title: "Zenvi".to_string(),
+            guifont: String::new(),
+            linespace: 0,
         }
     }
 }
