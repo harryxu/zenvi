@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use ui::ZenviView;
 
-actions!(zenvi, [Quit]);
+actions!(zenvi, [Quit, OpenFile, OpenFolder]);
 
 fn main() {
     env_logger::init();
@@ -22,16 +22,6 @@ fn main() {
     let _guard = rt.enter();
 
     Application::new().run(|cx: &mut App| {
-        // Register standard Quit action and Cmd+Q shortcut
-        cx.on_action(|_: &Quit, cx: &mut App| {
-            cx.quit();
-        });
-        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-        cx.set_menus(vec![Menu {
-            name: "Zenvi".into(),
-            items: vec![MenuItem::action("Quit Zenvi", Quit)],
-        }]);
-
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<NvimEvent>();
 
         let session = match NvimSession::spawn(event_tx) {
@@ -43,6 +33,76 @@ fn main() {
         };
 
         let session_clone = Arc::clone(&session);
+
+        // Register Actions
+        cx.on_action(|_: &Quit, cx: &mut App| {
+            cx.quit();
+        });
+
+        let session_open_file = Arc::clone(&session);
+        cx.on_action(move |_: &OpenFile, cx: &mut App| {
+            let session = Arc::clone(&session_open_file);
+            let receiver = cx.prompt_for_paths(PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: false,
+                prompt: Some("Open File".into()),
+            });
+            cx.spawn(|_cx: &mut AsyncApp| async move {
+                if let Ok(Ok(Some(paths))) = receiver.await {
+                    for path in paths {
+                        if let Some(parent) = path.parent() {
+                            session.send_command(&format!("cd {}", parent.display()));
+                        }
+                        session.send_command(&format!("edit {}", path.display()));
+                    }
+                }
+            })
+            .detach();
+        });
+
+        let session_open_folder = Arc::clone(&session);
+        cx.on_action(move |_: &OpenFolder, cx: &mut App| {
+            let session = Arc::clone(&session_open_folder);
+            let receiver = cx.prompt_for_paths(PathPromptOptions {
+                files: false,
+                directories: true,
+                multiple: false,
+                prompt: Some("Open Folder".into()),
+            });
+            cx.spawn(|_cx: &mut AsyncApp| async move {
+                if let Ok(Ok(Some(paths))) = receiver.await {
+                    for path in paths {
+                        session.send_command(&format!("cd {}", path.display()));
+                        session.send_command(&format!("edit {}", path.display()));
+                    }
+                }
+            })
+            .detach();
+        });
+
+        // Keybindings
+        cx.bind_keys([
+            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("cmd-o", OpenFile, None),
+            KeyBinding::new("cmd-alt-o", OpenFolder, None),
+            KeyBinding::new("cmd-shift-o", OpenFolder, None),
+        ]);
+
+        // macOS Application Menus
+        cx.set_menus(vec![
+            Menu {
+                name: "Zenvi".into(),
+                items: vec![MenuItem::action("Quit Zenvi", Quit)],
+            },
+            Menu {
+                name: "File".into(),
+                items: vec![
+                    MenuItem::action("Open File...", OpenFile),
+                    MenuItem::action("Open Folder...", OpenFolder),
+                ],
+            },
+        ]);
 
         let mut window_options = WindowOptions::default();
         window_options.window_bounds = Some(WindowBounds::Windowed(Bounds::new(

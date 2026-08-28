@@ -95,8 +95,14 @@ impl Render for ZenviView {
             }))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
                 for path in paths.paths() {
-                    if let Some(p) = path.to_str() {
-                        this.session.send_command(&format!("edit {}", p));
+                    if path.is_dir() {
+                        this.session.send_command(&format!("cd {}", path.display()));
+                        this.session.send_command(&format!("edit {}", path.display()));
+                    } else {
+                        if let Some(parent) = path.parent() {
+                            this.session.send_command(&format!("cd {}", parent.display()));
+                        }
+                        this.session.send_command(&format!("edit {}", path.display()));
                     }
                 }
             }))
