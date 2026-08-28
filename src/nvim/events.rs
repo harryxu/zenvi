@@ -10,6 +10,7 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) {
         Some(n) => n,
         None => return,
     };
+    // println!("REDRAW: {}", name);
 
     let calls = &event[1..];
     for call_val in calls {

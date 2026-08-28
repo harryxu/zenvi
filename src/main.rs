@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use ui::ZenviView;
 
-actions!(zenvi, [Quit, OpenFile, OpenFolder]);
+actions!(zenvi, [Quit, OpenFile, OpenFolder, Escape]);
 
 fn main() {
     env_logger::init();
@@ -39,6 +39,11 @@ fn main() {
         // Register Actions
         cx.on_action(|_: &Quit, cx: &mut App| {
             cx.quit();
+        });
+
+        let session_escape = Arc::clone(&session);
+        cx.on_action(move |_: &Escape, _cx: &mut App| {
+            session_escape.send_input("<Esc>");
         });
 
         let session_open_file = Arc::clone(&session);
@@ -89,6 +94,8 @@ fn main() {
             KeyBinding::new("cmd-o", OpenFile, None),
             KeyBinding::new("cmd-alt-o", OpenFolder, None),
             KeyBinding::new("cmd-shift-o", OpenFolder, None),
+            KeyBinding::new("escape", Escape, None),
+            KeyBinding::new("ctrl-[", Escape, None),
         ]);
 
         // macOS Application Menus

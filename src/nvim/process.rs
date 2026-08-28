@@ -28,7 +28,7 @@ impl NvimSession {
         let mut child = Command::new("nvim")
             .arg("--embed")
             .arg("--cmd")
-            .arg("let g:zenvi = v:true | let g:gui_running = 1")
+            .arg("let g:zenvi = v:true | let g:gui_running = 1 | set ttimeout ttimeoutlen=10")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -194,5 +194,62 @@ impl NvimSession {
             params: vec![Value::from(width as u64), Value::from(height as u64)],
         };
         let _ = self.tx.send(msg.to_value());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn test_nvim_insert_escape() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let session = NvimSession::spawn(tx).expect("Failed to spawn nvim");
+        session.attach_ui(80, 24);
+
+        // Wait for initial redraws
+        while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+            if event == Some(NvimEvent::Redraw) {
+                break;
+            }
+        }
+
+        session.send_command("inoremap <esc> <cmd>noh<cr><esc>");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Enter insert mode
+        session.send_input("i");
+        while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+            if event == Some(NvimEvent::Redraw) {
+                let s = session.state.read();
+                if s.current_mode == "insert" {
+                    break;
+                }
+            }
+        }
+
+        {
+            let s = session.state.read();
+            println!("After 'i', mode: {}", s.current_mode);
+            assert_eq!(s.current_mode, "insert");
+        }
+
+        // Send <Esc>
+        session.send_input("<Esc>");
+        while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+            if event == Some(NvimEvent::Redraw) {
+                let s = session.state.read();
+                if s.current_mode == "normal" {
+                    break;
+                }
+            }
+        }
+
+        {
+            let s = session.state.read();
+            println!("After '<Esc>', mode: {}", s.current_mode);
+            assert_eq!(s.current_mode, "normal");
+        }
     }
 }

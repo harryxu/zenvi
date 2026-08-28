@@ -1,7 +1,7 @@
 use gpui::KeyDownEvent;
 
 pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
-    let key = event.keystroke.key.as_str();
+    let raw_key = event.keystroke.key.as_str();
     let mods = &event.keystroke.modifiers;
 
     let ctrl = mods.control;
@@ -11,29 +11,32 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
 
     // Do not forward system menu shortcuts to Neovim
     if cmd {
-        match key {
+        match raw_key {
             "q" | "Q" | "o" | "O" => return None,
             _ => {}
         }
     }
 
+    let key_lower = raw_key.to_lowercase();
+    let key = key_lower.as_str();
+
     // Map special key names to Neovim equivalents
     let special_name = match key {
-        "enter" | "return" => Some("CR"),
-        "escape" | "esc" => Some("Esc"),
-        "backspace" => Some("BS"),
-        "tab" => Some("Tab"),
+        "enter" | "return" | "\r" | "\n" => Some("CR"),
+        "escape" | "esc" | "\x1b" => Some("Esc"),
+        "backspace" | "bs" | "\x08" | "\u{7f}" => Some("BS"),
+        "tab" | "\t" => Some("Tab"),
         "space" => Some("Space"),
         "up" => Some("Up"),
         "down" => Some("Down"),
         "left" => Some("Left"),
         "right" => Some("Right"),
-        "pageup" => Some("PageUp"),
-        "pagedown" => Some("PageDown"),
+        "pageup" | "page_up" => Some("PageUp"),
+        "pagedown" | "page_down" => Some("PageDown"),
         "home" => Some("Home"),
         "end" => Some("End"),
         "insert" => Some("Insert"),
-        "delete" => Some("Del"),
+        "delete" | "del" => Some("Del"),
         "f1" => Some("F1"),
         "f2" => Some("F2"),
         "f3" => Some("F3"),
@@ -67,7 +70,7 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
         return Some(format!("<{}{}>", prefix, name));
     }
 
-    // Single character with modifiers or raw
+    // Single character with modifiers
     if ctrl || alt || cmd {
         let mut prefix = String::new();
         if ctrl {
@@ -82,7 +85,7 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
         if shift {
             prefix.push_str("S-");
         }
-        return Some(format!("<{}{}>", prefix, key));
+        return Some(format!("<{}{}>", prefix, raw_key));
     }
 
     // Normal text input
@@ -93,12 +96,68 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
         return Some(ch.to_string());
     }
 
-    if key.chars().count() == 1 {
-        if key == "<" {
+    if raw_key.chars().count() == 1 {
+        if raw_key == "<" {
             return Some("<lt>".to_string());
         }
-        return Some(key.to_string());
+        return Some(raw_key.to_string());
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{Keystroke, Modifiers};
+
+    fn make_event(key: &str, ctrl: bool, alt: bool, shift: bool, cmd: bool) -> KeyDownEvent {
+        KeyDownEvent {
+            keystroke: Keystroke {
+                modifiers: Modifiers {
+                    control: ctrl,
+                    alt,
+                    shift,
+                    platform: cmd,
+                    function: false,
+                },
+                key: key.to_string(),
+                key_char: None,
+            },
+            is_held: false,
+        }
+    }
+
+    #[test]
+    fn test_escape_variants() {
+        assert_eq!(key_event_to_nvim(&make_event("escape", false, false, false, false)), Some("<Esc>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("Escape", false, false, false, false)), Some("<Esc>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("esc", false, false, false, false)), Some("<Esc>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("\u{1b}", false, false, false, false)), Some("<Esc>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("\x1b", false, false, false, false)), Some("<Esc>".to_string()));
+    }
+
+    #[test]
+    fn test_enter_variants() {
+        assert_eq!(key_event_to_nvim(&make_event("enter", false, false, false, false)), Some("<CR>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("Return", false, false, false, false)), Some("<CR>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("\r", false, false, false, false)), Some("<CR>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("\n", false, false, false, false)), Some("<CR>".to_string()));
+    }
+
+    #[test]
+    fn test_backspace_and_tab() {
+        assert_eq!(key_event_to_nvim(&make_event("Backspace", false, false, false, false)), Some("<BS>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("\x08", false, false, false, false)), Some("<BS>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("\u{7f}", false, false, false, false)), Some("<BS>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("Tab", false, false, false, false)), Some("<Tab>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("\t", false, false, false, false)), Some("<Tab>".to_string()));
+    }
+
+    #[test]
+    fn test_arrows_and_modifiers() {
+        assert_eq!(key_event_to_nvim(&make_event("Up", false, false, false, false)), Some("<Up>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("c", true, false, false, false)), Some("<C-c>".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("s", false, false, false, true)), Some("<D-s>".to_string()));
+    }
 }

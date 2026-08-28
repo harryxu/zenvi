@@ -176,6 +176,9 @@ impl Render for ZenviView {
             _ => rgb(0x37474f),
         };
 
+        let focus_handle = self.focus_handle.clone();
+        let entity = cx.entity().clone();
+
         div()
             .id("zenvi-root")
             .size_full()
@@ -184,6 +187,19 @@ impl Render for ZenviView {
             .bg(rgb(default_bg))
             .track_focus(&self.focus_handle)
             .key_context("zenvi")
+            .child(
+                canvas(
+                    |_bounds, _window, _cx| {},
+                    move |bounds, _, window, cx| {
+                        window.handle_input(
+                            &focus_handle,
+                            ElementInputHandler::new(bounds, entity),
+                            cx,
+                        );
+                    },
+                )
+                .size_0(),
+            )
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, _cx| {
                 if let Some(nvim_key) = key_event_to_nvim(event) {
                     this.session.send_input(&nvim_key);
@@ -373,5 +389,80 @@ impl Render for ZenviView {
                             .child("Zenvi (GPUI + Neovim)"),
                     ),
             )
+    }
+}
+
+impl EntityInputHandler for ZenviView {
+    fn text_for_range(
+        &mut self,
+        _range_utf16: std::ops::Range<usize>,
+        _actual_range: &mut Option<std::ops::Range<usize>>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<String> {
+        None
+    }
+
+    fn selected_text_range(
+        &mut self,
+        _ignore_disabled_input: bool,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<UTF16Selection> {
+        Some(UTF16Selection {
+            range: 0..0,
+            reversed: false,
+        })
+    }
+
+    fn marked_text_range(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<std::ops::Range<usize>> {
+        None
+    }
+
+    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
+
+    fn replace_text_in_range(
+        &mut self,
+        _range_utf16: Option<std::ops::Range<usize>>,
+        new_text: &str,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        if !new_text.is_empty() && (!new_text.is_ascii() || new_text.len() > 1) {
+            self.session.send_input(new_text);
+        }
+    }
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _range_utf16: Option<std::ops::Range<usize>>,
+        _new_text: &str,
+        _new_selected_range_utf16: Option<std::ops::Range<usize>>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+    }
+
+    fn bounds_for_range(
+        &mut self,
+        _range_utf16: std::ops::Range<usize>,
+        element_bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        Some(element_bounds)
+    }
+
+    fn character_index_for_point(
+        &mut self,
+        _point: Point<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        Some(0)
     }
 }
