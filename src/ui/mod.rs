@@ -184,6 +184,7 @@ impl Render for ZenviView {
             &self.font_family,
             self.font_size,
             self.line_height,
+            self.char_width,
         );
 
         // Status bar colors based on mode
