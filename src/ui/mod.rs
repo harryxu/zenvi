@@ -47,13 +47,25 @@ impl ZenviView {
         session.attach_ui(100, 35);
         session.send_command("set mouse=a");
 
+        let font_family = "Menlo".to_string();
+        let font_size = px(14.0);
+        let line_height = px(20.0);
+
+        let font_id = cx.text_system().resolve_font(&font(&font_family));
+        let char_width: f32 = cx
+            .text_system()
+            .advance(font_id, font_size, '0')
+            .or_else(|_| cx.text_system().advance(font_id, font_size, 'm'))
+            .map(|s| s.width.into())
+            .unwrap_or(14.0 * 0.6015);
+
         Self {
             session,
             focus_handle,
-            font_family: "Menlo".to_string(),
-            font_size: px(14.0),
-            line_height: px(20.0),
-            char_width: 8.42,
+            font_family,
+            font_size,
+            line_height,
+            char_width,
             last_cols: 100,
             last_rows: 35,
             last_guifont: String::new(),
@@ -63,7 +75,7 @@ impl ZenviView {
         }
     }
 
-    fn update_font(&mut self, guifont: &str, linespace: i64) {
+    fn update_font(&mut self, guifont: &str, linespace: i64, cx: &App) {
         let parsed = parse_guifont(guifont);
 
         if let Some(family) = parsed.family {
@@ -81,7 +93,16 @@ impl ZenviView {
         };
 
         self.font_size = px(size);
-        self.char_width = size * 0.6015;
+
+        // Measure actual monospace advance width using GPUI text system
+        let font_id = cx.text_system().resolve_font(&font(&self.font_family));
+        let advance: f32 = cx
+            .text_system()
+            .advance(font_id, self.font_size, '0')
+            .or_else(|_| cx.text_system().advance(font_id, self.font_size, 'm'))
+            .map(|s| s.width.into())
+            .unwrap_or(size * 0.6015);
+        self.char_width = advance;
 
         // Line height calculation: base 1.428 multiplier + linespace pixels
         let base_lh = (size * 1.428).round();
@@ -93,12 +114,11 @@ impl ZenviView {
         let x: f32 = pos.x.into();
         let y: f32 = pos.y.into();
 
-        // Titlebar height: 32.0, Grid padding: 4.0
-        let top_offset = 36.0;
-        let left_offset = 4.0;
+        // Titlebar height: 32.0
+        let top_offset = 32.0;
         let lh: f32 = self.line_height.into();
 
-        let col = ((x - left_offset) / self.char_width).floor().max(0.0) as usize;
+        let col = (x / self.char_width).floor().max(0.0) as usize;
         let row = ((y - top_offset) / lh).floor().max(0.0) as usize;
 
         (
@@ -122,7 +142,7 @@ impl Render for ZenviView {
         if guifont_changed {
             self.last_guifont = new_guifont.clone();
             self.last_linespace = new_linespace;
-            self.update_font(&new_guifont, new_linespace);
+            self.update_font(&new_guifont, new_linespace, cx);
         }
 
         let state = self.session.state.read();
@@ -140,18 +160,17 @@ impl Render for ZenviView {
             .cloned()
             .unwrap_or_else(|| crate::nvim::state::Grid::new(1, 80, 24));
 
-        let bounds = window.bounds();
-        let window_w: f32 = bounds.size.width.into();
-        let window_h: f32 = bounds.size.height.into();
+        let viewport = window.viewport_size();
+        let window_w: f32 = viewport.width.into();
+        let window_h: f32 = viewport.height.into();
 
-        // Titlebar height: 32px, Bottom status bar height: 24px, Padding: 8px
+        // Titlebar height: 32px, Bottom status bar height: 24px
         let top_offset = 32.0;
         let bottom_offset = 24.0;
-        let padding_y = 8.0;
         let lh: f32 = self.line_height.into();
 
-        let cols = ((window_w - 16.0) / self.char_width).floor().max(20.0) as usize;
-        let rows = ((window_h - top_offset - bottom_offset - padding_y) / lh).floor().max(5.0) as usize;
+        let cols = (window_w / self.char_width).floor().max(20.0) as usize;
+        let rows = ((window_h - top_offset - bottom_offset) / lh).floor().max(5.0) as usize;
 
         if cols != self.last_cols || rows != self.last_rows {
             self.last_cols = cols;
@@ -341,8 +360,8 @@ impl Render for ZenviView {
                 // Editor Main Grid Area
                 div()
                     .flex_1()
+                    .w_full()
                     .overflow_hidden()
-                    .p(px(4.0))
                     .child(grid_element),
             )
             .child(

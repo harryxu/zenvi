@@ -28,6 +28,13 @@ pub fn render_grid(
         let mut spans: Vec<CellSpan> = Vec::new();
 
         for (c_idx, cell) in row.iter().enumerate() {
+            // In Neovim ext_linegrid, a double-width character occupies 2 cells:
+            // the first cell contains the character, and the second cell has width == 0 and text == "".
+            // Skip the second trailing cell so we don't insert an extra space.
+            if cell.width == 0 && cell.text.is_empty() {
+                continue;
+            }
+
             let is_cursor = is_cursor_row && c_idx == grid.cursor_col;
 
             let attr = state
@@ -98,6 +105,7 @@ pub fn render_grid(
             div()
                 .flex()
                 .flex_row()
+                .w_full()
                 .h(line_height)
                 .children(span_elements),
         );
@@ -106,6 +114,7 @@ pub fn render_grid(
     div()
         .flex()
         .flex_col()
+        .w_full()
         .font_family(font_family.to_string())
         .text_size(font_size)
         .line_height(line_height)
