@@ -140,13 +140,8 @@ pub fn render_grid(
             .h(px(2.0))
             .bg(rgb(default_fg)),
         _ => {
-            let hl_attr = cell_under_cursor
-                .and_then(|c| state.highlights.get(&c.hl_id))
-                .cloned()
-                .unwrap_or_default();
-
-            let cursor_bg = hl_attr.foreground.unwrap_or(default_fg);
-            let cursor_fg = hl_attr.background.unwrap_or(default_bg);
+            let cursor_bg = default_fg;
+            let cursor_fg = default_bg;
 
             div()
                 .absolute()
