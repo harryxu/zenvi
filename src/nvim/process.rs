@@ -11,6 +11,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NvimEvent {
+    Redraw,
+    Exit,
+}
+
 pub struct NvimSession {
     msg_id: AtomicU32,
     tx: mpsc::UnboundedSender<Value>,
@@ -18,10 +24,7 @@ pub struct NvimSession {
 }
 
 impl NvimSession {
-    pub fn spawn<F>(on_redraw: F) -> Result<Arc<Self>>
-    where
-        F: Fn() + Send + Sync + 'static,
-    {
+    pub fn spawn(event_tx: mpsc::UnboundedSender<NvimEvent>) -> Result<Arc<Self>> {
         let mut child = Command::new("nvim")
             .arg("--embed")
             .stdin(Stdio::piped())
@@ -53,6 +56,8 @@ impl NvimSession {
         });
 
         let state_clone = Arc::clone(&state);
+        let event_tx_clone = event_tx.clone();
+
         // Background task to read from stdout
         tokio::spawn(async move {
             let mut reader = tokio::io::BufReader::new(stdout);
@@ -61,7 +66,11 @@ impl NvimSession {
 
             loop {
                 match reader.read(&mut temp_buf).await {
-                    Ok(0) => break, // EOF
+                    Ok(0) => {
+                        // Neovim has terminated (EOF)
+                        let _ = event_tx_clone.send(NvimEvent::Exit);
+                        break;
+                    }
                     Ok(n) => {
                         buffer.extend_from_slice(&temp_buf[..n]);
 
@@ -82,7 +91,7 @@ impl NvimSession {
                                                     }
                                                 }
                                             }
-                                            on_redraw();
+                                            let _ = event_tx_clone.send(NvimEvent::Redraw);
                                         }
                                     }
                                     RpcMessage::Response { .. } => {}
@@ -95,7 +104,10 @@ impl NvimSession {
                             buffer.drain(..last_pos);
                         }
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        let _ = event_tx_clone.send(NvimEvent::Exit);
+                        break;
+                    }
                 }
             }
         });

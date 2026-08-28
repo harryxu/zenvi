@@ -3,10 +3,12 @@ mod nvim;
 mod ui;
 
 use gpui::*;
-use nvim::process::NvimSession;
+use nvim::process::{NvimEvent, NvimSession};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use ui::ZenviView;
+
+actions!(zenvi, [Quit]);
 
 fn main() {
     env_logger::init();
@@ -20,11 +22,19 @@ fn main() {
     let _guard = rt.enter();
 
     Application::new().run(|cx: &mut App| {
-        let (redraw_tx, mut redraw_rx) = mpsc::unbounded_channel::<()>();
+        // Register standard Quit action and Cmd+Q shortcut
+        cx.on_action(|_: &Quit, cx: &mut App| {
+            cx.quit();
+        });
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.set_menus(vec![Menu {
+            name: "Zenvi".into(),
+            items: vec![MenuItem::action("Quit Zenvi", Quit)],
+        }]);
 
-        let session = match NvimSession::spawn(move || {
-            let _ = redraw_tx.send(());
-        }) {
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel::<NvimEvent>();
+
+        let session = match NvimSession::spawn(event_tx) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Failed to spawn Neovim process: {:?}", e);
@@ -52,15 +62,24 @@ fn main() {
                 view
             });
 
-            // Listen for redraw notifications from Neovim and notify the view
+            // Listen for events (redraw / exit) from Neovim and notify the view or quit
             let view_weak = view.downgrade();
             cx.spawn(|cx: &mut AsyncApp| {
                 let mut cx = cx.clone();
                 async move {
-                    while let Some(_) = redraw_rx.recv().await {
-                        let _ = view_weak.update(&mut cx, |_this, cx| {
-                            cx.notify();
-                        });
+                    while let Some(event) = event_rx.recv().await {
+                        match event {
+                            NvimEvent::Redraw => {
+                                let _ = view_weak.update(&mut cx, |_this, cx| {
+                                    cx.notify();
+                                });
+                            }
+                            NvimEvent::Exit => {
+                                let _ = cx.update(|cx| {
+                                    cx.quit();
+                                });
+                            }
+                        }
                     }
                 }
             })

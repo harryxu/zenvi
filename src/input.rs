@@ -9,6 +9,11 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
     let shift = mods.shift;
     let cmd = mods.platform;
 
+    // Do not forward Cmd+Q (Quit) to Neovim so system/GPUI action handles app exit
+    if cmd && (key == "q" || key == "Q") {
+        return None;
+    }
+
     // Map special key names to Neovim equivalents
     let special_name = match key {
         "enter" | "return" => Some("CR"),
