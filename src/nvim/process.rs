@@ -159,6 +159,31 @@ impl NvimSession {
         let _ = self.tx.send(msg.to_value());
     }
 
+    pub fn send_mouse(
+        &self,
+        button: &str,
+        action: &str,
+        modifier: &str,
+        grid: u64,
+        row: usize,
+        col: usize,
+    ) {
+        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
+        let msg = RpcMessage::Request {
+            msgid: id,
+            method: "nvim_input_mouse".to_string(),
+            params: vec![
+                Value::from(button),
+                Value::from(action),
+                Value::from(modifier),
+                Value::from(grid),
+                Value::from(row as u64),
+                Value::from(col as u64),
+            ],
+        };
+        let _ = self.tx.send(msg.to_value());
+    }
+
     pub fn try_resize(&self, width: usize, height: usize) {
         let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
         let msg = RpcMessage::Request {

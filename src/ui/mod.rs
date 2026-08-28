@@ -5,6 +5,23 @@ use crate::nvim::process::NvimSession;
 use gpui::*;
 use std::sync::Arc;
 
+fn mods_to_nvim(mods: &Modifiers) -> String {
+    let mut s = String::new();
+    if mods.control {
+        s.push('C');
+    }
+    if mods.shift {
+        s.push('S');
+    }
+    if mods.alt {
+        s.push('A');
+    }
+    if mods.platform {
+        s.push('D');
+    }
+    s
+}
+
 pub struct ZenviView {
     pub session: Arc<NvimSession>,
     pub focus_handle: FocusHandle,
@@ -13,6 +30,8 @@ pub struct ZenviView {
     pub char_width: f32,
     pub last_cols: usize,
     pub last_rows: usize,
+    pub is_mouse_down: bool,
+    pub scroll_accum_y: f32,
 }
 
 impl ZenviView {
@@ -21,6 +40,7 @@ impl ZenviView {
 
         // Initial attach with 100x35
         session.attach_ui(100, 35);
+        session.send_command("set mouse=a");
 
         Self {
             session,
@@ -30,7 +50,26 @@ impl ZenviView {
             char_width: 8.42,
             last_cols: 100,
             last_rows: 35,
+            is_mouse_down: false,
+            scroll_accum_y: 0.0,
         }
+    }
+
+    fn pos_to_grid(&self, pos: Point<Pixels>) -> (usize, usize) {
+        let x: f32 = pos.x.into();
+        let y: f32 = pos.y.into();
+
+        // Titlebar height: 32.0, Grid padding: 4.0
+        let top_offset = 36.0;
+        let left_offset = 4.0;
+
+        let col = ((x - left_offset) / self.char_width).floor().max(0.0) as usize;
+        let row = ((y - top_offset) / 20.0).floor().max(0.0) as usize;
+
+        (
+            col.min(self.last_cols.saturating_sub(1)),
+            row.min(self.last_rows.saturating_sub(1)),
+        )
     }
 }
 
@@ -91,6 +130,98 @@ impl Render for ZenviView {
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, _cx| {
                 if let Some(nvim_key) = key_event_to_nvim(event) {
                     this.session.send_input(&nvim_key);
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, window, _cx| {
+                    window.focus(&this.focus_handle);
+                    this.is_mouse_down = true;
+                    let (col, row) = this.pos_to_grid(event.position);
+                    let mods = mods_to_nvim(&event.modifiers);
+                    this.session.send_mouse("left", "press", &mods, 0, row, col);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, window, _cx| {
+                    window.focus(&this.focus_handle);
+                    let (col, row) = this.pos_to_grid(event.position);
+                    let mods = mods_to_nvim(&event.modifiers);
+                    this.session.send_mouse("right", "press", &mods, 0, row, col);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener(|this, event: &MouseDownEvent, window, _cx| {
+                    window.focus(&this.focus_handle);
+                    let (col, row) = this.pos_to_grid(event.position);
+                    let mods = mods_to_nvim(&event.modifiers);
+                    this.session.send_mouse("middle", "press", &mods, 0, row, col);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
+                    this.is_mouse_down = false;
+                    let (col, row) = this.pos_to_grid(event.position);
+                    let mods = mods_to_nvim(&event.modifiers);
+                    this.session.send_mouse("left", "release", &mods, 0, row, col);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
+                    let (col, row) = this.pos_to_grid(event.position);
+                    let mods = mods_to_nvim(&event.modifiers);
+                    this.session.send_mouse("right", "release", &mods, 0, row, col);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
+                    let (col, row) = this.pos_to_grid(event.position);
+                    let mods = mods_to_nvim(&event.modifiers);
+                    this.session.send_mouse("middle", "release", &mods, 0, row, col);
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, _cx| {
+                if this.is_mouse_down {
+                    let (col, row) = this.pos_to_grid(event.position);
+                    let mods = mods_to_nvim(&event.modifiers);
+                    this.session.send_mouse("left", "drag", &mods, 0, row, col);
+                }
+            }))
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
+                let (col, row) = this.pos_to_grid(event.position);
+                let mods = mods_to_nvim(&event.modifiers);
+
+                match event.delta {
+                    ScrollDelta::Pixels(p) => {
+                        let dy: f32 = p.y.into();
+                        this.scroll_accum_y += dy;
+                        let step = 15.0;
+                        while this.scroll_accum_y >= step {
+                            this.scroll_accum_y -= step;
+                            this.session.send_mouse("wheel", "up", &mods, 0, row, col);
+                        }
+                        while this.scroll_accum_y <= -step {
+                            this.scroll_accum_y += step;
+                            this.session.send_mouse("wheel", "down", &mods, 0, row, col);
+                        }
+                    }
+                    ScrollDelta::Lines(l) => {
+                        let lines = l.y;
+                        if lines > 0.0 {
+                            for _ in 0..(lines.round().abs() as usize) {
+                                this.session.send_mouse("wheel", "up", &mods, 0, row, col);
+                            }
+                        } else if lines < 0.0 {
+                            for _ in 0..(lines.round().abs() as usize) {
+                                this.session.send_mouse("wheel", "down", &mods, 0, row, col);
+                            }
+                        }
+                    }
                 }
             }))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
