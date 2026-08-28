@@ -113,11 +113,22 @@ fn main() {
             },
         ]);
 
+        let window_size = Size::new(px(1080.0), px(720.0));
+        let window_bounds = if let Some(display) = cx.displays().first() {
+            let screen = display.bounds();
+            let origin = Point::new(
+                screen.origin.x + ((screen.size.width - window_size.width) / 2.0).max(px(0.0)),
+                screen.origin.y + ((screen.size.height - window_size.height) / 2.0).max(px(0.0)),
+            );
+            Bounds::new(origin, window_size)
+        } else {
+            Bounds::new(Point::new(px(100.0), px(100.0)), window_size)
+        };
+
         let mut window_options = WindowOptions::default();
-        window_options.window_bounds = Some(WindowBounds::Windowed(Bounds::new(
-            Point::new(px(100.0), px(100.0)),
-            Size::new(px(1000.0), px(700.0)),
-        )));
+        window_options.window_bounds = Some(WindowBounds::Windowed(window_bounds));
+        window_options.focus = true;
+        window_options.show = true;
         window_options.titlebar = Some(TitlebarOptions {
             title: Some("Zenvi".into()),
             appears_transparent: true,
@@ -125,6 +136,8 @@ fn main() {
         });
 
         cx.open_window(window_options, |window, cx| {
+            cx.activate(true);
+
             let view = cx.new(|cx| {
                 let view = ZenviView::new(session_clone, cx);
                 window.focus(&view.focus_handle);
