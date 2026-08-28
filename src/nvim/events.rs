@@ -117,7 +117,7 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) {
                                     continue;
                                 }
 
-                                let text = cell_info[0].as_str().unwrap_or(" ").to_string();
+                                let text = cell_info[0].as_str().unwrap_or("").to_string();
                                 if cell_info.len() >= 2 {
                                     current_hl = cell_info[1].as_u64().unwrap_or(0) as u32;
                                 }
@@ -131,7 +131,7 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) {
                                 let cell = Cell {
                                     text: text.clone(),
                                     hl_id: current_hl,
-                                    width: if char_width == 0 { 1 } else { char_width },
+                                    width: char_width,
                                 };
 
                                 for _ in 0..repeat {
