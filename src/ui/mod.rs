@@ -30,6 +30,7 @@ fn mods_to_nvim(mods: &Modifiers) -> String {
 pub struct ZenviView {
     pub session: Arc<NvimSession>,
     pub focus_handle: FocusHandle,
+    pub window_handle: AnyWindowHandle,
     pub font_family: String,
     pub font_size: Pixels,
     pub line_height: Pixels,
@@ -45,11 +46,19 @@ pub struct ZenviView {
 }
 
 impl ZenviView {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window_handle: AnyWindowHandle, cx: &mut Context<Self>) -> Self {
+        Self::with_cwd(window_handle, None, cx)
+    }
+
+    pub fn with_cwd(
+        window_handle: AnyWindowHandle,
+        cwd: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
 
         let (event_tx, event_rx) = mpsc::unbounded_channel::<NvimEvent>();
-        let session = match NvimSession::spawn(event_tx, None) {
+        let session = match NvimSession::spawn(event_tx, cwd.clone()) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Failed to spawn Neovim process: {:?}", e);
@@ -60,6 +69,10 @@ impl ZenviView {
         // Initial attach with 100x35
         session.attach_ui(100, 35);
         session.send_command("set mouse=a");
+
+        if let Some(ref dir) = cwd {
+            session.send_command(&format!("cd {}", dir.display()));
+        }
 
         let font_family = "Menlo".to_string();
         let font_size = px(14.0);
@@ -73,11 +86,12 @@ impl ZenviView {
             .map(|s| s.width.into())
             .unwrap_or(14.0 * 0.6015);
 
-        let event_task = Self::spawn_event_listener(event_rx, cx);
+        let event_task = Self::spawn_event_listener(event_rx, window_handle, cx);
 
         Self {
             session,
             focus_handle,
+            window_handle,
             font_family,
             font_size,
             line_height,
@@ -88,16 +102,17 @@ impl ZenviView {
             last_linespace: 0,
             is_mouse_down: false,
             scroll_accum_y: 0.0,
-            cwd: None,
+            cwd,
             _event_task: Some(event_task),
         }
     }
 
     fn spawn_event_listener(
         mut event_rx: mpsc::UnboundedReceiver<NvimEvent>,
+        window_handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) -> Task<()> {
-        cx.spawn(|this: WeakEntity<Self>, cx: &mut AsyncApp| {
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let mut cx = cx.clone();
             async move {
                 while let Some(event) = event_rx.recv().await {
@@ -108,8 +123,11 @@ impl ZenviView {
                             });
                         }
                         NvimEvent::Exit => {
-                            let _ = cx.update(|cx| {
-                                cx.quit();
+                            let _ = window_handle.update(&mut cx, |_, window, cx| {
+                                window.remove_window();
+                                if cx.windows().len() <= 1 {
+                                    cx.quit();
+                                }
                             });
                         }
                     }
@@ -129,10 +147,14 @@ impl ZenviView {
                 new_session.attach_ui(self.last_cols, self.last_rows);
                 new_session.send_command("set mouse=a");
 
+                if let Some(ref dir) = self.cwd {
+                    new_session.send_command(&format!("cd {}", dir.display()));
+                }
+
                 self.session = new_session;
                 self.last_guifont = String::new();
                 self.last_linespace = 0;
-                self._event_task = Some(Self::spawn_event_listener(event_rx, cx));
+                self._event_task = Some(Self::spawn_event_listener(event_rx, self.window_handle, cx));
                 cx.notify();
             }
             Err(e) => {
