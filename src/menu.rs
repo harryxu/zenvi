@@ -16,6 +16,8 @@ pub fn init_menus(cx: &mut App) {
         Menu {
             name: "File".into(),
             items: vec![
+                MenuItem::action("New Window", NewWindow),
+                MenuItem::separator(),
                 MenuItem::action("Open File...", OpenFile),
                 MenuItem::action("Open Folder...", OpenFolder),
                 MenuItem::action("Open Neovim Config", OpenConfig),

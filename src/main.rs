@@ -29,6 +29,10 @@ fn main() {
             cx.quit();
         });
 
+        cx.on_action(|_: &NewWindow, cx: &mut App| {
+            window::open_zenvi_window(None, cx);
+        });
+
         cx.on_action(|_: &OpenConfig, cx: &mut App| {
             let config_dir = window::get_nvim_config_dir();
             if !config_dir.exists() {

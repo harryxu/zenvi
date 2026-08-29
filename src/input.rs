@@ -12,7 +12,7 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
     // Do not forward system menu shortcuts to Neovim
     if cmd {
         match raw_key {
-            "q" | "Q" | "o" | "O" | "r" | "R" | "," => return None,
+            "q" | "Q" | "o" | "O" | "r" | "R" | "n" | "N" | "," => return None,
             _ => {}
         }
     }
