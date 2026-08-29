@@ -59,6 +59,18 @@ cargo build --release
 ./target/release/zenvi
 ```
 
+### 📦 Packaging macOS Desktop App (`Zenvi.app`)
+
+Zenvi includes an automated packaging pipeline with high-resolution Retina icons (`AppIcon.icns`):
+
+```bash
+# Package Zenvi.app into target/Zenvi.app
+bash scripts/bundle_macos.sh
+
+# Open the packaged standalone app
+open target/Zenvi.app
+```
+
 ---
 
 ## 🏗️ Project Architecture

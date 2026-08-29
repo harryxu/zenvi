@@ -478,15 +478,30 @@ impl Render for ZenviView {
                     .border_color(rgb(0x222222))
                     .child(
                         div()
-                            .text_size(px(12.0))
-                            .text_color(rgb(0xaaaaaa))
-                            .child(title),
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(rgb(0xdcdcdc))
+                                    .child(title),
+                            ),
                     )
                     .child(
                         div()
-                            .text_size(px(11.0))
-                            .text_color(rgb(0x666666))
-                            .child("⚡️ GPUI"),
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(0x777777))
+                                    .child("⚡️ GPUI"),
+                            ),
                     ),
             )
             .child(

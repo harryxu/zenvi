@@ -26,12 +26,62 @@ pub struct NvimSession {
     abort_handles: Vec<tokio::task::AbortHandle>,
 }
 
+fn find_nvim_binary() -> PathBuf {
+    if let Ok(path) = std::env::var("NVIM_PATH") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return p;
+        }
+    }
+
+    let candidates = [
+        "nvim",
+        "/opt/homebrew/bin/nvim",
+        "/usr/local/bin/nvim",
+        "/usr/bin/nvim",
+        "/bin/nvim",
+    ];
+
+    for candidate in candidates {
+        let p = PathBuf::from(candidate);
+        if candidate == "nvim" {
+            if let Ok(output) = std::process::Command::new("which").arg("nvim").output() {
+                if output.status.success() {
+                    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !s.is_empty() {
+                        return PathBuf::from(s);
+                    }
+                }
+            }
+        } else if p.exists() {
+            return p;
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        let user_candidates = [
+            format!("{}/.local/bin/nvim", home),
+            format!("{}/.cargo/bin/nvim", home),
+            format!("{}/bin/nvim", home),
+        ];
+        for candidate in user_candidates {
+            let p = PathBuf::from(candidate);
+            if p.exists() {
+                return p;
+            }
+        }
+    }
+
+    PathBuf::from("nvim")
+}
+
 impl NvimSession {
     pub fn spawn(
         event_tx: mpsc::UnboundedSender<NvimEvent>,
         cwd: Option<PathBuf>,
     ) -> Result<Arc<Self>> {
-        let mut cmd = Command::new("nvim");
+        let nvim_bin = find_nvim_binary();
+        let mut cmd = Command::new(&nvim_bin);
         cmd.arg("--embed")
             .arg("--cmd")
             .arg("let g:zenvi = v:true | let g:gui_running = 1 | set ttimeout ttimeoutlen=10")
@@ -39,8 +89,30 @@ impl NvimSession {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
 
+        // Augment PATH so GUI apps launched by Finder inherit Homebrew, Cargo, and local binaries
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let mut augmented_paths = vec![
+            "/opt/homebrew/bin".to_string(),
+            "/opt/homebrew/sbin".to_string(),
+            "/usr/local/bin".to_string(),
+            "/usr/bin".to_string(),
+            "/bin".to_string(),
+            "/usr/sbin".to_string(),
+            "/sbin".to_string(),
+        ];
+        if let Ok(home) = std::env::var("HOME") {
+            augmented_paths.insert(0, format!("{}/.local/bin", home));
+            augmented_paths.insert(1, format!("{}/.cargo/bin", home));
+        }
+        augmented_paths.push(current_path);
+        let new_path = augmented_paths.join(":");
+        cmd.env("PATH", new_path);
+
         if let Some(ref dir) = cwd {
             cmd.current_dir(dir);
+        } else if let Ok(home) = std::env::var("HOME") {
+            // When launched from Finder, default to user's HOME directory rather than root /
+            cmd.current_dir(home);
         }
 
         let mut child = cmd.spawn()?;
