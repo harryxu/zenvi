@@ -325,7 +325,6 @@ impl Render for ZenviView {
 
         let state = self.session.state.read();
         let default_bg = state.default_bg;
-        let current_mode = state.current_mode.to_uppercase();
         let title = if state.title.is_empty() {
             "Zenvi".to_string()
         } else {
@@ -342,13 +341,12 @@ impl Render for ZenviView {
         let window_w: f32 = viewport.width.into();
         let window_h: f32 = viewport.height.into();
 
-        // Titlebar height: 32px, Bottom status bar height: 24px
+        // Titlebar height: 32px
         let top_offset = 32.0;
-        let bottom_offset = 24.0;
         let lh: f32 = self.line_height.into();
 
         let cols = (window_w / self.char_width).floor().max(20.0) as usize;
-        let rows = ((window_h - top_offset - bottom_offset) / lh).floor().max(5.0) as usize;
+        let rows = ((window_h - top_offset) / lh).floor().max(5.0) as usize;
 
         if cols != self.last_cols || rows != self.last_rows {
             self.last_cols = cols;
@@ -364,15 +362,6 @@ impl Render for ZenviView {
             self.line_height,
             self.char_width,
         );
-
-        // Status bar colors based on mode
-        let mode_bg = match current_mode.as_str() {
-            "INSERT" => rgb(0x2e7d32),
-            "VISUAL" | "V-LINE" | "V-BLOCK" => rgb(0x6a1b9a),
-            "REPLACE" => rgb(0xc62828),
-            "COMMAND" => rgb(0xef6c00),
-            _ => rgb(0x37474f),
-        };
 
         let focus_handle = self.focus_handle.clone();
         let entity = cx.entity().clone();
@@ -574,50 +563,6 @@ impl Render for ZenviView {
                     .w_full()
                     .overflow_hidden()
                     .child(grid_element),
-            )
-            .child(
-                // Bottom native status bar
-                div()
-                    .h(px(24.0))
-                    .w_full()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .px(px(8.0))
-                    .bg(rgb(0x181818))
-                    .border_t_1()
-                    .border_color(rgb(0x2a2a2a))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .px(px(6.0))
-                                    .py(px(1.0))
-                                    .rounded(px(3.0))
-                                    .bg(mode_bg)
-                                    .text_size(px(11.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0xffffff))
-                                    .child(current_mode),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(rgb(0x888888))
-                                    .child(format!("{}:{}", grid.cursor_row + 1, grid.cursor_col + 1)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(rgb(0x888888))
-                            .child("Zenvi (GPUI + Neovim)"),
-                    ),
             )
     }
 }

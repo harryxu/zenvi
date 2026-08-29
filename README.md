@@ -15,7 +15,6 @@ A modern, standalone, GPU-accelerated **Neovim GUI frontend** built in Rust with
 - **⌨️ Rich Keyboard Mapping**: Full support for Neovim key sequences (`<Esc>`, `<CR>`, `<C-w>`, `<M-x>`, `<D-s>`, arrow keys, function keys, and more).
 - **📐 Dynamic Resizing**: Automatically computes optimal cols/rows based on window dimensions and updates Neovim grid size in real time.
 - **🔤 Native `guifont` Support**: Configure font family and font size natively in `init.lua` via `vim.opt.guifont = "JetBrainsMono Nerd Font:h15"`. Zenvi also injects `vim.g.zenvi = true` and `vim.g.gui_running = 1` before `init.lua` loads.
-- **🎨 Native Status Bar**: Displays current mode (NORMAL, INSERT, VISUAL, etc.) and cursor position.
 
 ---
 

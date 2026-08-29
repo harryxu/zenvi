@@ -75,8 +75,7 @@
 * **Span Batching (`src/ui/grid.rs`):** Rather than rendering 80+ separate DOM elements per line, adjacent cells sharing identical highlight attributes (foreground, background, bold, italic, underline) are merged into single `CellSpan` elements for high GPU throughput.
 * **Layout Geometry:**
   * Top titlebar: `32px` with `pl(px(78.0))` for macOS traffic light buttons.
-  * Bottom status bar: `24px` displaying mode (Normal, Insert, Visual) and line/col.
-  * Grid area: Fills remaining window height. Automatically recalculates `(cols, rows)` on window resize and notifies Neovim via `nvim_ui_try_resize`.
+  * Grid area: Fills all remaining window height down to the bottom. Automatically recalculates `(cols, rows)` on window resize and notifies Neovim via `nvim_ui_try_resize`.
 
 ### C. Input & Mouse Management (`src/input.rs`, `src/ui/mod.rs`)
 * **Keyboard (`src/input.rs`):** Converts GPUI `KeyDownEvent` into Neovim-compatible strings (e.g. `<CR>`, `<Esc>`, `<C-w>`, `<M-x>`, `<D-s>`, `<lt>`). System-level shortcuts (`Cmd+Q`, `Cmd+O`, `Cmd+Shift+O`) are bypassed to let GPUI native actions handle them.
