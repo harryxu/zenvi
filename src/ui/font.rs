@@ -16,12 +16,12 @@ pub fn parse_guifont(guifont: &str) -> ParsedGuiFont {
     }
 
     // In Vim/Neovim, guifont can be a comma-separated list of fallbacks (e.g. "JetBrainsMono Nerd Font:h14,Menlo:h14")
-    let primary = trimmed.split(',').next().unwrap_or(trimmed).trim();
+    let primary = trimmed.split(",").next().unwrap_or(trimmed).trim();
     if primary.is_empty() {
         return result;
     }
 
-    let parts: Vec<&str> = primary.split(':').collect();
+    let parts: Vec<&str> = primary.split(":").collect();
     if parts.is_empty() {
         return result;
     }
@@ -30,8 +30,8 @@ pub fn parse_guifont(guifont: &str) -> ParsedGuiFont {
     let font_name = parts[0].trim();
     if !font_name.is_empty() {
         // Vim replaces underscores with spaces and handles backslash escapes
-        let unescaped = font_name.replace('\\', "");
-        let with_spaces = unescaped.replace('_', " ");
+        let unescaped = font_name.replace("\\", "");
+        let with_spaces = unescaped.replace("_", " ");
         let cleaned = with_spaces.trim().to_string();
         if !cleaned.is_empty() {
             result.family = Some(cleaned);
@@ -41,7 +41,7 @@ pub fn parse_guifont(guifont: &str) -> ParsedGuiFont {
     // Subsequent parts are attributes like "h14", "h14.5", "w8", etc.
     for part in &parts[1..] {
         let part = part.trim();
-        if part.starts_with('h') || part.starts_with('H') {
+        if part.starts_with("h") || part.starts_with("H") {
             if let Ok(size) = part[1..].parse::<f32>() {
                 if size > 4.0 && size < 120.0 {
                     result.size = Some(size);

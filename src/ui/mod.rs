@@ -69,6 +69,14 @@ impl ZenviView {
         // Initial attach with 100x35
         session.attach_ui(100, 35);
         session.send_command("set mouse=a");
+        session.send_command(r#"lua (function()
+            if vim.o.guifont and vim.o.guifont ~= "" then
+                vim.o.guifont = vim.o.guifont
+            end
+            if vim.o.linespace and vim.o.linespace ~= 0 then
+                vim.o.linespace = vim.o.linespace
+            end
+        end)()"#);
 
         if let Some(ref dir) = cwd {
             session.send_command(&format!("cd {}", dir.display()));
@@ -76,7 +84,7 @@ impl ZenviView {
 
         let font_family = "Menlo".to_string();
         let font_size = px(14.0);
-        let line_height = px(20.0);
+        let line_height = px((14.0_f32 * 1.2_f32).round());
 
         let font_id = cx.text_system().resolve_font(&font(&font_family));
         let char_width: f32 = cx
@@ -282,8 +290,8 @@ impl ZenviView {
             .unwrap_or(size * 0.6015);
         self.char_width = advance;
 
-        // Line height calculation: base 1.428 multiplier + linespace pixels
-        let base_lh = (size * 1.428).round();
+        // Line height calculation: terminal monospace 1.2x ratio + linespace pixels
+        let base_lh = (size * 1.2).round();
         let final_lh = (base_lh + linespace as f32).max(8.0);
         self.line_height = px(final_lh);
     }
