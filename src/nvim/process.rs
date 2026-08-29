@@ -4,13 +4,14 @@ use crate::nvim::state::NvimState;
 use anyhow::{anyhow, Result};
 use parking_lot::RwLock;
 use rmpv::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NvimEvent {
@@ -18,12 +19,16 @@ pub enum NvimEvent {
     Exit,
 }
 
+type PendingResponseTx = oneshot::Sender<Result<Value, Value>>;
+type PendingRequests = Arc<parking_lot::Mutex<HashMap<u32, PendingResponseTx>>>;
+
 pub struct NvimSession {
     msg_id: AtomicU32,
     tx: mpsc::UnboundedSender<Value>,
     pub state: Arc<RwLock<NvimState>>,
     is_terminating: Arc<AtomicBool>,
     abort_handles: Vec<tokio::task::AbortHandle>,
+    pending_requests: PendingRequests,
 }
 
 fn find_nvim_binary() -> PathBuf {
@@ -130,6 +135,8 @@ impl NvimSession {
         let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
         let state = Arc::new(RwLock::new(NvimState::default()));
         let is_terminating = Arc::new(AtomicBool::new(false));
+        let pending_requests: PendingRequests = Arc::new(parking_lot::Mutex::new(HashMap::new()));
+        let pending_requests_clone = Arc::clone(&pending_requests);
 
         // Background task to write to stdin
         let write_task = tokio::spawn(async move {
@@ -184,7 +191,20 @@ impl NvimSession {
                                             let _ = event_tx_clone.send(NvimEvent::Redraw);
                                         }
                                     }
-                                    RpcMessage::Response { .. } => {}
+                                    RpcMessage::Response {
+                                        msgid,
+                                        error,
+                                        result,
+                                    } => {
+                                        let mut map = pending_requests_clone.lock();
+                                        if let Some(tx) = map.remove(&msgid) {
+                                            if error.is_nil() {
+                                                let _ = tx.send(Ok(result));
+                                            } else {
+                                                let _ = tx.send(Err(error));
+                                            }
+                                        }
+                                    }
                                     RpcMessage::Request { .. } => {}
                                 }
                             }
@@ -221,6 +241,7 @@ impl NvimSession {
             state,
             is_terminating,
             abort_handles,
+            pending_requests,
         });
 
         Ok(session)
@@ -232,6 +253,40 @@ impl NvimSession {
         for handle in &self.abort_handles {
             handle.abort();
         }
+        self.pending_requests.lock().clear();
+    }
+
+    pub async fn request(&self, method: &str, params: Vec<Value>) -> Result<Value> {
+        let (tx, rx) = oneshot::channel();
+        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
+        self.pending_requests.lock().insert(id, tx);
+
+        let msg = RpcMessage::Request {
+            msgid: id,
+            method: method.to_string(),
+            params,
+        };
+        self.tx
+            .send(msg.to_value())
+            .map_err(|_| anyhow!("Failed to send RPC request"))?;
+
+        match tokio::time::timeout(std::time::Duration::from_millis(600), rx).await {
+            Ok(Ok(Ok(val))) => Ok(val),
+            Ok(Ok(Err(err))) => Err(anyhow!("RPC error: {:?}", err)),
+            Ok(Err(_)) => Err(anyhow!("RPC channel closed")),
+            Err(_) => {
+                self.pending_requests.lock().remove(&id);
+                Err(anyhow!("RPC request timed out"))
+            }
+        }
+    }
+
+    pub async fn exec_lua(&self, code: &str, args: Vec<Value>) -> Result<Value> {
+        self.request(
+            "nvim_exec_lua",
+            vec![Value::from(code), Value::Array(args)],
+        )
+        .await
     }
 
     pub fn attach_ui(&self, width: usize, height: usize) {
@@ -313,92 +368,210 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    #[tokio::test]
-    async fn test_nvim_insert_escape() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
-        session.attach_ui(80, 24);
+    #[test]
+    fn test_nvim_insert_escape() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
+            session.attach_ui(80, 24);
 
-        // Wait for initial redraws
-        while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-            if event == Some(NvimEvent::Redraw) {
-                break;
-            }
-        }
+            // Wait for initial redraws
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            while let Ok(_) = rx.try_recv() {}
 
-        session.send_command("inoremap <esc> <cmd>noh<cr><esc>");
-        tokio::time::sleep(Duration::from_millis(50)).await;
+            session.send_command("inoremap <esc> <cmd>noh<cr><esc>");
+            tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // Enter insert mode
-        session.send_input("i");
-        while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-            if event == Some(NvimEvent::Redraw) {
-                let s = session.state.read();
-                if s.current_mode == "insert" {
-                    break;
+            // Enter insert mode
+            session.send_input("i");
+            let start = std::time::Instant::now();
+            while start.elapsed() < Duration::from_millis(1000) {
+                if let Ok(event) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+                    if event == Some(NvimEvent::Redraw) {
+                        let s = session.state.read();
+                        if s.current_mode == "insert" {
+                            break;
+                        }
+                    }
                 }
             }
-        }
 
-        {
-            let s = session.state.read();
-            println!("After 'i', mode: {}", s.current_mode);
-            assert_eq!(s.current_mode, "insert");
-        }
-
-        // Send <Esc>
-        session.send_input("<Esc>");
-        while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-            if event == Some(NvimEvent::Redraw) {
+            {
                 let s = session.state.read();
-                if s.current_mode == "normal" {
-                    break;
+                println!("After 'i', mode: {}", s.current_mode);
+                assert_eq!(s.current_mode, "insert");
+            }
+
+            // Send <Esc>
+            session.send_input("<Esc>");
+            let start = std::time::Instant::now();
+            while start.elapsed() < Duration::from_millis(1000) {
+                if let Ok(event) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+                    if event == Some(NvimEvent::Redraw) {
+                        let s = session.state.read();
+                        if s.current_mode == "normal" {
+                            break;
+                        }
+                    }
                 }
             }
-        }
 
-        {
-            let s = session.state.read();
-            println!("After '<Esc>', mode: {}", s.current_mode);
-            assert_eq!(s.current_mode, "normal");
-        }
+            {
+                let s = session.state.read();
+                println!("After '<Esc>', mode: {}", s.current_mode);
+                assert_eq!(s.current_mode, "normal");
+            }
+
+            session.kill();
+        });
     }
 
-    #[tokio::test]
-    async fn test_nvim_kill_and_reload() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let session = NvimSession::spawn(tx, None).expect("Failed to spawn initial nvim");
-        session.attach_ui(80, 24);
+    #[test]
+    fn test_nvim_kill_and_reload() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let session = NvimSession::spawn(tx, None).expect("Failed to spawn initial nvim");
+            session.attach_ui(80, 24);
 
-        // Wait for initial redraws
-        while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
-            if event == Some(NvimEvent::Redraw) {
-                break;
+            // Wait for initial redraws
+            while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+                if event == Some(NvimEvent::Redraw) {
+                    break;
+                }
             }
-        }
 
-        // Kill session - ensure no Exit event is triggered
-        session.kill();
-        tokio::time::sleep(Duration::from_millis(50)).await;
+            // Kill session - ensure no Exit event is triggered
+            session.kill();
+            tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // Drain any remaining events in channel; none should be Exit
-        while let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
-            assert_ne!(event, NvimEvent::Exit, "Kill should not send Exit event");
-        }
-
-        // Spawn new session
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
-        let new_session = NvimSession::spawn(tx2, None).expect("Failed to spawn reloaded nvim");
-        new_session.attach_ui(80, 24);
-
-        let mut received_redraw = false;
-        while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx2.recv()).await {
-            if event == Some(NvimEvent::Redraw) {
-                received_redraw = true;
-                break;
+            // Drain any remaining events in channel; none should be Exit
+            while let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
+                assert_ne!(event, NvimEvent::Exit, "Kill should not send Exit event");
             }
-        }
-        assert!(received_redraw, "New session should send Redraw event");
-        new_session.kill();
+
+            // Spawn new session
+            let (tx2, mut rx2) = mpsc::unbounded_channel();
+            let new_session = NvimSession::spawn(tx2, None).expect("Failed to spawn reloaded nvim");
+            new_session.attach_ui(80, 24);
+
+            let mut received_redraw = false;
+            while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx2.recv()).await {
+                if event == Some(NvimEvent::Redraw) {
+                    received_redraw = true;
+                    break;
+                }
+            }
+            assert!(received_redraw, "New session should send Redraw event");
+            new_session.kill();
+        });
+    }
+
+    #[test]
+    fn test_nvim_exec_lua() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
+            session.attach_ui(80, 24);
+
+            let res = session
+                .exec_lua("return 1 + 1", vec![])
+                .await
+                .expect("Failed to exec lua");
+            assert_eq!(res.as_i64(), Some(2));
+
+            let res_table = session
+                .exec_lua("return { name = 'zenvi', count = 42 }", vec![])
+                .await
+                .expect("Failed to exec lua table");
+            if let Some(map) = res_table.as_map() {
+                let mut found_name = false;
+                let mut found_count = false;
+                for (k, v) in map {
+                    if k.as_str() == Some("name") && v.as_str() == Some("zenvi") {
+                        found_name = true;
+                    }
+                    if k.as_str() == Some("count") && v.as_i64() == Some(42) {
+                        found_count = true;
+                    }
+                }
+                assert!(found_name);
+                assert!(found_count);
+            } else {
+                panic!("Expected map from lua table");
+            }
+
+            session.kill();
+        });
+    }
+
+    #[test]
+    fn test_auto_session_query_logic() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
+            session.attach_ui(80, 24);
+
+            let check_lua = r#"
+                local ok, auto_session = pcall(require, "auto-session")
+                if not ok or not auto_session then
+                    return { has_auto_session = false, should_restore = false, cwd = vim.fn.getcwd() }
+                end
+
+                local is_session_active = false
+                local this_session = vim.v.this_session
+                if this_session and this_session ~= "" then
+                    is_session_active = true
+                else
+                    local lib_ok, lib = pcall(require, "auto-session.lib")
+                    if lib_ok and lib and lib.get_session_file_name then
+                        local sfile = lib.get_session_file_name()
+                        if sfile and vim.fn.filereadable(sfile) == 1 then
+                            is_session_active = true
+                        end
+                    end
+                end
+
+                local bufs = vim.fn.getbufinfo({ buflisted = 1 })
+                local has_valid_buffers = false
+                for _, b in ipairs(bufs) do
+                    if b.name and b.name ~= "" then
+                        has_valid_buffers = true
+                        break
+                    end
+                end
+
+                local should_restore = false
+                if is_session_active or has_valid_buffers then
+                    pcall(auto_session.save_session)
+                    should_restore = true
+                end
+
+                return {
+                    has_auto_session = true,
+                    should_restore = should_restore,
+                    cwd = vim.fn.getcwd(),
+                }
+            "#;
+
+            let res = session
+                .exec_lua(check_lua, vec![])
+                .await
+                .expect("Failed to run session check lua");
+            let map = res.as_map().expect("Expected map from lua table");
+            let mut has_cwd = false;
+            for (k, v) in map {
+                if k.as_str() == Some("cwd") {
+                    assert!(v.as_str().is_some());
+                    has_cwd = true;
+                }
+            }
+            assert!(has_cwd);
+
+            session.kill();
+        });
     }
 }

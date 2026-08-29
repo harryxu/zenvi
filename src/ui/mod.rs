@@ -146,29 +146,130 @@ impl ZenviView {
 
     pub fn reload_nvim(&mut self, cx: &mut Context<Self>) {
         log::info!("Reloading Neovim session...");
-        self.session.kill();
+        let old_session = Arc::clone(&self.session);
+        let last_cols = self.last_cols;
+        let last_rows = self.last_rows;
+        let fallback_cwd = self.cwd.clone();
+        let window_handle = self.window_handle;
+
         self._event_task = None;
 
-        let (event_tx, event_rx) = mpsc::unbounded_channel::<NvimEvent>();
-        match NvimSession::spawn(event_tx, self.cwd.clone()) {
-            Ok(new_session) => {
-                new_session.attach_ui(self.last_cols, self.last_rows);
-                new_session.send_command("set mouse=a");
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                // 1. Check auto-session status and save session if active
+                let check_lua = r#"
+                    local ok, auto_session = pcall(require, "auto-session")
+                    if not ok or not auto_session then
+                        return { has_auto_session = false, should_restore = false, cwd = vim.fn.getcwd() }
+                    end
 
-                if let Some(ref dir) = self.cwd {
-                    new_session.send_command(&format!("cd {}", dir.display()));
+                    local is_session_active = false
+                    local this_session = vim.v.this_session
+                    if this_session and this_session ~= "" then
+                        is_session_active = true
+                    else
+                        local lib_ok, lib = pcall(require, "auto-session.lib")
+                        if lib_ok and lib and lib.get_session_file_name then
+                            local sfile = lib.get_session_file_name()
+                            if sfile and vim.fn.filereadable(sfile) == 1 then
+                                is_session_active = true
+                            end
+                        end
+                    end
+
+                    -- Check if any named file buffers are currently open
+                    local bufs = vim.fn.getbufinfo({ buflisted = 1 })
+                    local has_valid_buffers = false
+                    for _, b in ipairs(bufs) do
+                        if b.name and b.name ~= "" then
+                            has_valid_buffers = true
+                            break
+                        end
+                    end
+
+                    local should_restore = false
+                    if is_session_active or has_valid_buffers then
+                        pcall(auto_session.save_session)
+                        should_restore = true
+                    end
+
+                    return {
+                        has_auto_session = true,
+                        should_restore = should_restore,
+                        cwd = vim.fn.getcwd(),
+                    }
+                "#;
+
+                let (should_restore, current_cwd) = match old_session.exec_lua(check_lua, vec![]).await {
+                    Ok(val) => {
+                        let mut should_restore = false;
+                        let mut cwd_opt = None;
+                        if let Some(map) = val.as_map() {
+                            for (k, v) in map {
+                                if k.as_str() == Some("should_restore") {
+                                    should_restore = v.as_bool().unwrap_or(false);
+                                } else if k.as_str() == Some("cwd") {
+                                    if let Some(s) = v.as_str() {
+                                        if !s.is_empty() {
+                                            cwd_opt = Some(PathBuf::from(s));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        (should_restore, cwd_opt.or(fallback_cwd))
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to query auto-session before reload: {:?}", e);
+                        (false, fallback_cwd)
+                    }
+                };
+
+                // 2. Terminate old session
+                old_session.kill();
+
+                // 3. Spawn new session in background
+                let (event_tx, event_rx) = mpsc::unbounded_channel::<NvimEvent>();
+                match NvimSession::spawn(event_tx, current_cwd.clone()) {
+                    Ok(new_session) => {
+                        new_session.attach_ui(last_cols, last_rows);
+                        new_session.send_command("set mouse=a");
+
+                        if let Some(ref dir) = current_cwd {
+                            new_session.send_command(&format!("cd {}", dir.display()));
+                        }
+
+                        // 4. If auto-session was active, restore session in new instance
+                        if should_restore {
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            let restore_lua = r#"
+                                (function()
+                                    local ok, auto_session = pcall(require, "auto-session")
+                                    if ok and auto_session then
+                                        pcall(auto_session.restore_session)
+                                    end
+                                end)()
+                            "#;
+                            new_session.send_command(&format!("lua {}", restore_lua));
+                        }
+
+                        let _ = this.update(&mut cx, |this, cx| {
+                            this.session = new_session;
+                            this.cwd = current_cwd;
+                            this.last_guifont = String::new();
+                            this.last_linespace = 0;
+                            this._event_task = Some(Self::spawn_event_listener(event_rx, window_handle, cx));
+                            cx.notify();
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to reload Neovim: {:?}", e);
+                    }
                 }
-
-                self.session = new_session;
-                self.last_guifont = String::new();
-                self.last_linespace = 0;
-                self._event_task = Some(Self::spawn_event_listener(event_rx, self.window_handle, cx));
-                cx.notify();
             }
-            Err(e) => {
-                eprintln!("Failed to reload Neovim: {:?}", e);
-            }
-        }
+        })
+        .detach();
     }
 
     pub fn open_file(&mut self, cx: &mut Context<Self>) {
