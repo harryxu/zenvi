@@ -2,10 +2,13 @@ pub mod font;
 pub mod grid;
 
 use crate::input::key_event_to_nvim;
-use crate::nvim::process::NvimSession;
+use crate::nvim::process::{NvimEvent, NvimSession};
+use crate::{Escape, OpenFile, OpenFolder, ReloadNvim};
 use font::parse_guifont;
 use gpui::*;
+use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 fn mods_to_nvim(mods: &Modifiers) -> String {
     let mut s = String::new();
@@ -37,11 +40,22 @@ pub struct ZenviView {
     pub last_linespace: i64,
     pub is_mouse_down: bool,
     pub scroll_accum_y: f32,
+    pub cwd: Option<PathBuf>,
+    _event_task: Option<Task<()>>,
 }
 
 impl ZenviView {
-    pub fn new(session: Arc<NvimSession>, cx: &mut Context<Self>) -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
+
+        let (event_tx, event_rx) = mpsc::unbounded_channel::<NvimEvent>();
+        let session = match NvimSession::spawn(event_tx, None) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to spawn Neovim process: {:?}", e);
+                std::process::exit(1);
+            }
+        };
 
         // Initial attach with 100x35
         session.attach_ui(100, 35);
@@ -59,6 +73,8 @@ impl ZenviView {
             .map(|s| s.width.into())
             .unwrap_or(14.0 * 0.6015);
 
+        let event_task = Self::spawn_event_listener(event_rx, cx);
+
         Self {
             session,
             focus_handle,
@@ -72,7 +88,109 @@ impl ZenviView {
             last_linespace: 0,
             is_mouse_down: false,
             scroll_accum_y: 0.0,
+            cwd: None,
+            _event_task: Some(event_task),
         }
+    }
+
+    fn spawn_event_listener(
+        mut event_rx: mpsc::UnboundedReceiver<NvimEvent>,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
+        cx.spawn(|this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                while let Some(event) = event_rx.recv().await {
+                    match event {
+                        NvimEvent::Redraw => {
+                            let _ = this.update(&mut cx, |_this, cx| {
+                                cx.notify();
+                            });
+                        }
+                        NvimEvent::Exit => {
+                            let _ = cx.update(|cx| {
+                                cx.quit();
+                            });
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    pub fn reload_nvim(&mut self, cx: &mut Context<Self>) {
+        log::info!("Reloading Neovim session...");
+        self.session.kill();
+        self._event_task = None;
+
+        let (event_tx, event_rx) = mpsc::unbounded_channel::<NvimEvent>();
+        match NvimSession::spawn(event_tx, self.cwd.clone()) {
+            Ok(new_session) => {
+                new_session.attach_ui(self.last_cols, self.last_rows);
+                new_session.send_command("set mouse=a");
+
+                self.session = new_session;
+                self.last_guifont = String::new();
+                self.last_linespace = 0;
+                self._event_task = Some(Self::spawn_event_listener(event_rx, cx));
+                cx.notify();
+            }
+            Err(e) => {
+                eprintln!("Failed to reload Neovim: {:?}", e);
+            }
+        }
+    }
+
+    pub fn open_file(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Open File".into()),
+        });
+        let session = Arc::clone(&self.session);
+        cx.spawn(|this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                if let Ok(Ok(Some(paths))) = receiver.await {
+                    for path in paths {
+                        if let Some(parent) = path.parent() {
+                            let _ = this.update(&mut cx, |this, _cx| {
+                                this.cwd = Some(parent.to_path_buf());
+                            });
+                            session.send_command(&format!("cd {}", parent.display()));
+                        }
+                        session.send_command(&format!("edit {}", path.display()));
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub fn open_folder(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Open Folder".into()),
+        });
+        let session = Arc::clone(&self.session);
+        cx.spawn(|this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                if let Ok(Ok(Some(paths))) = receiver.await {
+                    for path in paths {
+                        let _ = this.update(&mut cx, |this, _cx| {
+                            this.cwd = Some(path.clone());
+                        });
+                        session.send_command(&format!("cd {}", path.display()));
+                        session.send_command(&format!("edit {}", path.display()));
+                    }
+                }
+            }
+        })
+        .detach();
     }
 
     fn update_font(&mut self, guifont: &str, linespace: i64, cx: &App) {
@@ -207,6 +325,18 @@ impl Render for ZenviView {
             .bg(rgb(default_bg))
             .track_focus(&self.focus_handle)
             .key_context("zenvi")
+            .on_action(cx.listener(|this, _: &ReloadNvim, _window, cx| {
+                this.reload_nvim(cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenFile, _window, cx| {
+                this.open_file(cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenFolder, _window, cx| {
+                this.open_folder(cx);
+            }))
+            .on_action(cx.listener(|this, _: &Escape, _window, _cx| {
+                this.session.send_input("<Esc>");
+            }))
             .child(
                 canvas(
                     |_bounds, _window, _cx| {},
@@ -320,10 +450,12 @@ impl Render for ZenviView {
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
                 for path in paths.paths() {
                     if path.is_dir() {
+                        this.cwd = Some(path.clone());
                         this.session.send_command(&format!("cd {}", path.display()));
                         this.session.send_command(&format!("edit {}", path.display()));
                     } else {
                         if let Some(parent) = path.parent() {
+                            this.cwd = Some(parent.to_path_buf());
                             this.session.send_command(&format!("cd {}", parent.display()));
                         }
                         this.session.send_command(&format!("edit {}", path.display()));

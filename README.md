@@ -8,6 +8,7 @@ A modern, standalone, GPU-accelerated **Neovim GUI frontend** built in Rust with
 
 - **🚀 Embedded Neovim**: Runs true Neovim (`nvim --embed`) in the background via MessagePack-RPC. All your existing `init.lua`, Lua plugins, Treesitter, and LSP configurations work out of the box.
 - **⚡️ GPU Accelerated**: Native rendering powered by GPUI with Metal / Vulkan.
+- **🔄 Neovim Hot Reload**: Reload the embedded Neovim session on the fly via macOS menu (`Zenvi -> Reload Neovim` / `File -> Reload Neovim`) or shortcut (`Cmd+Shift+R`) whenever your `init.lua` changes.
 - **📂 External Drag & Drop**: Drag any file or folder from Finder / file manager into the Zenvi window to immediately open and edit it (`:edit <path>`).
 - **⌨️ Rich Keyboard Mapping**: Full support for Neovim key sequences (`<Esc>`, `<CR>`, `<C-w>`, `<M-x>`, `<D-s>`, arrow keys, function keys, and more).
 - **📐 Dynamic Resizing**: Automatically computes optimal cols/rows based on window dimensions and updates Neovim grid size in real time.

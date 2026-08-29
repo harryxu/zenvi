@@ -4,8 +4,9 @@ use crate::nvim::state::NvimState;
 use anyhow::{anyhow, Result};
 use parking_lot::RwLock;
 use rmpv::Value;
+use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
@@ -21,18 +22,28 @@ pub struct NvimSession {
     msg_id: AtomicU32,
     tx: mpsc::UnboundedSender<Value>,
     pub state: Arc<RwLock<NvimState>>,
+    is_terminating: Arc<AtomicBool>,
+    abort_handles: Vec<tokio::task::AbortHandle>,
 }
 
 impl NvimSession {
-    pub fn spawn(event_tx: mpsc::UnboundedSender<NvimEvent>) -> Result<Arc<Self>> {
-        let mut child = Command::new("nvim")
-            .arg("--embed")
+    pub fn spawn(
+        event_tx: mpsc::UnboundedSender<NvimEvent>,
+        cwd: Option<PathBuf>,
+    ) -> Result<Arc<Self>> {
+        let mut cmd = Command::new("nvim");
+        cmd.arg("--embed")
             .arg("--cmd")
             .arg("let g:zenvi = v:true | let g:gui_running = 1 | set ttimeout ttimeoutlen=10")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()?;
+            .stderr(Stdio::null());
+
+        if let Some(ref dir) = cwd {
+            cmd.current_dir(dir);
+        }
+
+        let mut child = cmd.spawn()?;
 
         let mut stdin = child
             .stdin
@@ -45,9 +56,10 @@ impl NvimSession {
 
         let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
         let state = Arc::new(RwLock::new(NvimState::default()));
+        let is_terminating = Arc::new(AtomicBool::new(false));
 
         // Background task to write to stdin
-        tokio::spawn(async move {
+        let write_task = tokio::spawn(async move {
             while let Some(val) = rx.recv().await {
                 let mut buf = Vec::new();
                 if let Ok(_) = rmpv::encode::write_value(&mut buf, &val) {
@@ -59,9 +71,10 @@ impl NvimSession {
 
         let state_clone = Arc::clone(&state);
         let event_tx_clone = event_tx.clone();
+        let is_terminating_clone = Arc::clone(&is_terminating);
 
         // Background task to read from stdout
-        tokio::spawn(async move {
+        let read_task = tokio::spawn(async move {
             let mut reader = tokio::io::BufReader::new(stdout);
             let mut buffer = Vec::new();
             let mut temp_buf = [0u8; 8192];
@@ -70,7 +83,9 @@ impl NvimSession {
                 match reader.read(&mut temp_buf).await {
                     Ok(0) => {
                         // Neovim has terminated (EOF)
-                        let _ = event_tx_clone.send(NvimEvent::Exit);
+                        if !is_terminating_clone.load(Ordering::SeqCst) {
+                            let _ = event_tx_clone.send(NvimEvent::Exit);
+                        }
                         break;
                     }
                     Ok(n) => {
@@ -107,20 +122,43 @@ impl NvimSession {
                         }
                     }
                     Err(_) => {
-                        let _ = event_tx_clone.send(NvimEvent::Exit);
+                        if !is_terminating_clone.load(Ordering::SeqCst) {
+                            let _ = event_tx_clone.send(NvimEvent::Exit);
+                        }
                         break;
                     }
                 }
             }
         });
 
+        // Background task to wait on child process and clean up
+        let child_task = tokio::spawn(async move {
+            let _ = child.wait().await;
+        });
+
+        let abort_handles = vec![
+            write_task.abort_handle(),
+            read_task.abort_handle(),
+            child_task.abort_handle(),
+        ];
+
         let session = Arc::new(Self {
             msg_id: AtomicU32::new(1),
             tx,
             state,
+            is_terminating,
+            abort_handles,
         });
 
         Ok(session)
+    }
+
+    pub fn kill(&self) {
+        self.is_terminating.store(true, Ordering::SeqCst);
+        let _ = self.send_command("qa!");
+        for handle in &self.abort_handles {
+            handle.abort();
+        }
     }
 
     pub fn attach_ui(&self, width: usize, height: usize) {
@@ -205,7 +243,7 @@ mod tests {
     #[tokio::test]
     async fn test_nvim_insert_escape() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let session = NvimSession::spawn(tx).expect("Failed to spawn nvim");
+        let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
         session.attach_ui(80, 24);
 
         // Wait for initial redraws
@@ -251,5 +289,43 @@ mod tests {
             println!("After '<Esc>', mode: {}", s.current_mode);
             assert_eq!(s.current_mode, "normal");
         }
+    }
+
+    #[tokio::test]
+    async fn test_nvim_kill_and_reload() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let session = NvimSession::spawn(tx, None).expect("Failed to spawn initial nvim");
+        session.attach_ui(80, 24);
+
+        // Wait for initial redraws
+        while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+            if event == Some(NvimEvent::Redraw) {
+                break;
+            }
+        }
+
+        // Kill session - ensure no Exit event is triggered
+        session.kill();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Drain any remaining events in channel; none should be Exit
+        while let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
+            assert_ne!(event, NvimEvent::Exit, "Kill should not send Exit event");
+        }
+
+        // Spawn new session
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let new_session = NvimSession::spawn(tx2, None).expect("Failed to spawn reloaded nvim");
+        new_session.attach_ui(80, 24);
+
+        let mut received_redraw = false;
+        while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx2.recv()).await {
+            if event == Some(NvimEvent::Redraw) {
+                received_redraw = true;
+                break;
+            }
+        }
+        assert!(received_redraw, "New session should send Redraw event");
+        new_session.kill();
     }
 }

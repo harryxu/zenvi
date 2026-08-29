@@ -12,7 +12,7 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
     // Do not forward system menu shortcuts to Neovim
     if cmd {
         match raw_key {
-            "q" | "Q" | "o" | "O" => return None,
+            "q" | "Q" | "o" | "O" | "r" | "R" => return None,
             _ => {}
         }
     }
@@ -159,5 +159,14 @@ mod tests {
         assert_eq!(key_event_to_nvim(&make_event("Up", false, false, false, false)), Some("<Up>".to_string()));
         assert_eq!(key_event_to_nvim(&make_event("c", true, false, false, false)), Some("<C-c>".to_string()));
         assert_eq!(key_event_to_nvim(&make_event("s", false, false, false, true)), Some("<D-s>".to_string()));
+    }
+
+    #[test]
+    fn test_system_shortcuts_ignored() {
+        assert_eq!(key_event_to_nvim(&make_event("q", false, false, false, true)), None);
+        assert_eq!(key_event_to_nvim(&make_event("o", false, false, false, true)), None);
+        assert_eq!(key_event_to_nvim(&make_event("r", false, false, false, true)), None);
+        assert_eq!(key_event_to_nvim(&make_event("R", false, false, true, true)), None);
+        assert_eq!(key_event_to_nvim(&make_event("r", false, false, true, true)), None);
     }
 }
