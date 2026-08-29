@@ -111,8 +111,9 @@ impl NvimSession {
         if let Some(ref dir) = cwd {
             cmd.current_dir(dir);
         } else if let Ok(home) = std::env::var("HOME") {
-            // When launched from Finder, default to user's HOME directory rather than root /
-            cmd.current_dir(home);
+            let state_dir = PathBuf::from(&home).join(".local").join("state").join("zenvi");
+            let _ = std::fs::create_dir_all(&state_dir);
+            cmd.current_dir(state_dir);
         }
 
         let mut child = cmd.spawn()?;

@@ -16,6 +16,45 @@ pub fn get_nvim_config_dir() -> PathBuf {
     PathBuf::from(".config/nvim")
 }
 
+pub fn get_safe_default_dir() -> Option<PathBuf> {
+    if let Ok(home) = std::env::var("HOME") {
+        let state_dir = PathBuf::from(home).join(".local").join("state").join("zenvi");
+        let _ = std::fs::create_dir_all(&state_dir);
+        return Some(state_dir);
+    }
+    None
+}
+
+pub fn resolve_initial_cwd() -> Option<PathBuf> {
+    // 1. Check CLI arguments
+    if let Some(arg) = std::env::args().nth(1) {
+        let p = PathBuf::from(arg);
+        if p.is_dir() {
+            return Some(p);
+        } else if let Some(parent) = p.parent() {
+            if parent.exists() && parent.as_os_str() != "" {
+                return Some(parent.to_path_buf());
+            }
+        }
+    }
+
+    // 2. Check terminal working directory
+    if let Ok(current) = std::env::current_dir() {
+        if current.as_os_str() != "/" && !current.to_string_lossy().contains(".app/Contents") {
+            if let Ok(home) = std::env::var("HOME") {
+                if current != PathBuf::from(&home) {
+                    return Some(current);
+                }
+            } else {
+                return Some(current);
+            }
+        }
+    }
+
+    // 3. Fallback when launched from Finder/Dock: use a clean app state directory
+    get_safe_default_dir()
+}
+
 pub fn open_zenvi_window(cwd: Option<PathBuf>, cx: &mut App) {
     let window_size = Size::new(px(1080.0), px(720.0));
     let window_count = cx.windows().len();

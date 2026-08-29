@@ -46,7 +46,8 @@ fn main() {
         menu::init_menus(cx);
 
         // Open initial window
-        window::open_zenvi_window(None, cx);
+        let initial_cwd = window::resolve_initial_cwd();
+        window::open_zenvi_window(initial_cwd, cx);
     });
 }
 
