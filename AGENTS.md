@@ -37,7 +37,11 @@
 ├── scripts/
 │   └── bundle_macos.sh      # macOS Zenvi.app standalone packaging script
 └── src/
-    ├── main.rs              # App entry point, GPUI Application lifecycle, Tokio runtime, Menu & Action routing
+    ├── main.rs              # App entry point, GPUI Application lifecycle & Tokio runtime initialization
+    ├── actions.rs           # Centralized GPUI Action definitions (Quit, OpenFile, OpenFolder, OpenConfig, etc.)
+    ├── keymap.rs            # Keyboard shortcuts mapping and registration
+    ├── menu.rs              # macOS Application menus hierarchy and action bindings
+    ├── window.rs            # Window lifecycle management, cascade offset calculation & config path resolution
     ├── input.rs             # Keyboard event translation (GPUI KeyDownEvent -> Neovim key notation)
     ├── bin/
     │   └── generate_icon.rs # Asset & icon rasterizer / icns compiler tool
