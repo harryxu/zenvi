@@ -8,6 +8,7 @@ actions!(
         OpenFile,
         OpenFolder,
         OpenConfig,
+        CloseBuffer,
         Escape,
         ReloadNvim,
     ]

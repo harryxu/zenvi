@@ -3,7 +3,7 @@ pub mod grid;
 
 use crate::input::key_event_to_nvim;
 use crate::nvim::process::{NvimEvent, NvimSession};
-use crate::{Escape, OpenFile, OpenFolder, ReloadNvim};
+use crate::{CloseBuffer, Escape, OpenFile, OpenFolder, ReloadNvim};
 use font::parse_guifont;
 use gpui::*;
 use std::path::PathBuf;
@@ -215,6 +215,44 @@ impl ZenviView {
         .detach();
     }
 
+    pub fn close_buffer(&mut self, _cx: &mut Context<Self>) {
+        let lua_cmd = r##"lua (function()
+            local cur = vim.api.nvim_get_current_buf()
+            local bufs = vim.tbl_filter(function(b)
+                return vim.api.nvim_buf_is_valid(b) and vim.bo[b].buflisted
+            end, vim.api.nvim_list_bufs())
+
+            if #bufs <= 1 then
+                vim.cmd("confirm quit")
+                return
+            end
+
+            local alt = vim.fn.bufnr("#")
+            local next_buf = nil
+            if alt > 0 and alt ~= cur and vim.api.nvim_buf_is_valid(alt) and vim.bo[alt].buflisted then
+                next_buf = alt
+            else
+                for _, b in ipairs(bufs) do
+                    if b ~= cur then
+                        next_buf = b
+                        break
+                    end
+                end
+            end
+
+            if next_buf then
+                for _, w in ipairs(vim.api.nvim_list_wins()) do
+                    if vim.api.nvim_win_is_valid(w) and vim.api.nvim_win_get_buf(w) == cur then
+                        vim.api.nvim_win_set_buf(w, next_buf)
+                    end
+                end
+            end
+
+            vim.cmd("confirm bdelete " .. cur)
+        end)()"##;
+        self.session.send_command(lua_cmd);
+    }
+
     fn update_font(&mut self, guifont: &str, linespace: i64, cx: &App) {
         let parsed = parse_guifont(guifont);
 
@@ -355,6 +393,9 @@ impl Render for ZenviView {
             }))
             .on_action(cx.listener(|this, _: &OpenFolder, _window, cx| {
                 this.open_folder(cx);
+            }))
+            .on_action(cx.listener(|this, _: &CloseBuffer, _window, cx| {
+                this.close_buffer(cx);
             }))
             .on_action(cx.listener(|this, _: &Escape, _window, _cx| {
                 this.session.send_input("<Esc>");

@@ -22,6 +22,8 @@ pub fn init_menus(cx: &mut App) {
                 MenuItem::action("Open Folder...", OpenFolder),
                 MenuItem::action("Open Neovim Config", OpenConfig),
                 MenuItem::separator(),
+                MenuItem::action("Close Window", CloseBuffer),
+                MenuItem::separator(),
                 MenuItem::action("Reload Neovim", ReloadNvim),
             ],
         },
