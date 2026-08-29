@@ -1,5 +1,7 @@
 # Zenvi ⚡️
 
+[![Rust](https://img.shields.io/badge/rust-1.98.0%2B-orange.svg)](https://blog.rust-lang.org/2026/08/20/Rust-1.98.0/)
+
 A modern, standalone, GPU-accelerated **Neovim GUI frontend** built in Rust with [GPUI](https://gpui.rs/) (the UI framework powering the Zed editor).
 
 ---
@@ -40,7 +42,7 @@ You can also change fonts dynamically at runtime inside Neovim:
 
 ## 🛠️ Requirements
 
-- **Rust**: 1.80+ (`cargo`, `rustc`)
+- **Rust**: 1.98.0+ (`cargo`, `rustc`)
 - **Neovim**: `nvim` installed and available in `$PATH`
 - **macOS**: Xcode Metal Toolchain (if building on macOS)
 

@@ -1,7 +1,7 @@
 # AGENTS.md - Developer & Agent Guide for Zenvi
 
 > **Project:** Zenvi (GPU-accelerated Standalone Neovim GUI Shell)  
-> **Tech Stack:** Rust, GPUI (`gpui 0.2.2`), Neovim RPC (`nvim --embed`), Tokio, MessagePack (`rmpv`)
+> **Tech Stack:** Rust (`1.98.0+`), GPUI (`gpui 0.2.2`), Neovim RPC (`nvim --embed`), Tokio, MessagePack (`rmpv`)
 
 ---
 
