@@ -2,7 +2,7 @@
 
   # Zenvi 
 
-  <img src="assets/icon-show.svg" width="96" alt="Zenvi Screenshot" />
+  <img src="assets/icon-show.svg" width="96" alt="Zenvi icon" />
 
   **A standalone, GPU-accelerated Neovim GUI frontend built with [GPUI](https://gpui.rs/).**
 
