@@ -11,7 +11,7 @@ A modern, standalone, GPU-accelerated **Neovim GUI frontend** built in Rust with
 - **🚀 Embedded Neovim**: Runs true Neovim (`nvim --embed`) in the background via MessagePack-RPC. All your existing `init.lua`, Lua plugins, Treesitter, and LSP configurations work out of the box.
 - **⚡️ GPU Accelerated**: Native rendering powered by GPUI with Metal / Vulkan.
 - **💻 CLI Integration**: Install `zenvi` command via macOS menu (`Zenvi -> Install Shell Command`) to open files or directories directly from your terminal (`zenvi .`, `zenvi file.rs`).
-- **🔄 Neovim Hot Reload**: Reload the embedded Neovim session on the fly via macOS menu (`Zenvi -> Reload Neovim` / `File -> Reload Neovim`) or shortcut (`Cmd+Shift+R`) whenever your `init.lua` changes. Automatically saves and restores active [auto-session](https://github.com/rmagatti/auto-session) workspace states.
+- **🔄 Neovim Hot Reload**: Reload the embedded Neovim session on the fly via macOS menu (`Zenvi -> Reload Neovim`) or shortcut (`Cmd+Shift+R`) whenever your `init.lua` changes. Automatically saves and restores active [auto-session](https://github.com/rmagatti/auto-session) workspace states.
 - **⌨️ Rich Keyboard Mapping**: Full support for Neovim key sequences (`<Esc>`, `<CR>`, `<C-w>`, `<M-x>`, `<D-s>`, arrow keys, function keys, and more).
 - **📐 Dynamic Resizing**: Automatically computes optimal cols/rows based on window dimensions and updates Neovim grid size in real time.
 - **🔤 Native `guifont` Support**: Configure font family and font size natively in `init.lua` via `vim.opt.guifont = "JetBrainsMono Nerd Font:h15"`. Zenvi also injects `vim.g.zenvi = true` and `vim.g.gui_running = 1` before `init.lua` loads.
