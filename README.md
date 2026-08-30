@@ -1,9 +1,12 @@
-# Zenvi ⚡️
+<div align="center">
 
-[![Rust](https://img.shields.io/badge/rust-1.98.0%2B-orange.svg)](https://blog.rust-lang.org/2026/08/20/Rust-1.98.0/)
+  # Zenvi 
 
-A modern, standalone, GPU-accelerated **Neovim GUI frontend** built in Rust with [GPUI](https://gpui.rs/) (the UI framework powering the Zed editor).
+  <img src="assets/icon-show.svg" width="96" alt="Zenvi Screenshot" />
 
+  **A standalone, GPU-accelerated Neovim GUI frontend built with [GPUI](https://gpui.rs/).**
+
+</div>
 ---
 
 ## ✨ Features
