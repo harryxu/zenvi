@@ -3,24 +3,50 @@ use gpui::*;
 use std::path::PathBuf;
 
 pub fn get_nvim_config_dir() -> PathBuf {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        let p = PathBuf::from(xdg).join("nvim");
-        if p.exists() {
-            return p;
+    #[cfg(windows)]
+    {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let p = PathBuf::from(local_app_data).join("nvim");
+            if p.exists() {
+                return p;
+            }
+        }
+        if let Ok(app_data) = std::env::var("APPDATA") {
+            return PathBuf::from(app_data).join("nvim");
         }
     }
-    if let Ok(home) = std::env::var("HOME") {
-        let p = PathBuf::from(home).join(".config").join("nvim");
-        return p;
+    #[cfg(not(windows))]
+    {
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            let p = PathBuf::from(xdg).join("nvim");
+            if p.exists() {
+                return p;
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let p = PathBuf::from(home).join(".config").join("nvim");
+            return p;
+        }
     }
     PathBuf::from(".config/nvim")
 }
 
 pub fn get_safe_default_dir() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("HOME") {
-        let state_dir = PathBuf::from(home).join(".local").join("state").join("zenvi");
-        let _ = std::fs::create_dir_all(&state_dir);
-        return Some(state_dir);
+    #[cfg(windows)]
+    {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let state_dir = PathBuf::from(local_app_data).join("zenvi");
+            let _ = std::fs::create_dir_all(&state_dir);
+            return Some(state_dir);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            let state_dir = PathBuf::from(home).join(".local").join("state").join("zenvi");
+            let _ = std::fs::create_dir_all(&state_dir);
+            return Some(state_dir);
+        }
     }
     None
 }
@@ -135,11 +161,23 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, cx: &mut A
     window_options.window_bounds = Some(WindowBounds::Windowed(window_bounds));
     window_options.focus = true;
     window_options.show = true;
-    window_options.titlebar = Some(TitlebarOptions {
-        title: Some("Zenvi".into()),
-        appears_transparent: true,
-        traffic_light_position: Some(Point::new(px(12.0), px(10.0))),
-    });
+
+    #[cfg(target_os = "macos")]
+    {
+        window_options.titlebar = Some(TitlebarOptions {
+            title: Some("Zenvi".into()),
+            appears_transparent: true,
+            traffic_light_position: Some(Point::new(px(12.0), px(10.0))),
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        window_options.titlebar = Some(TitlebarOptions {
+            title: Some("Zenvi".into()),
+            appears_transparent: false,
+            traffic_light_position: None,
+        });
+    }
 
     cx.open_window(window_options, |window, cx| {
         cx.activate(true);

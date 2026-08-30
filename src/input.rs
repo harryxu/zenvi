@@ -9,7 +9,8 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
     let shift = mods.shift;
     let cmd = mods.platform;
 
-    // Do not forward system menu shortcuts to Neovim
+    // Do not forward macOS system menu shortcuts (Cmd+Key) to Neovim
+    #[cfg(target_os = "macos")]
     if cmd {
         match raw_key {
             "q" | "Q" | "w" | "W" | "o" | "O" | "r" | "R" | "n" | "N" | "," => return None,

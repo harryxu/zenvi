@@ -4,6 +4,15 @@ pub struct ParsedGuiFont {
     pub size: Option<f32>,
 }
 
+pub fn default_font_family() -> &'static str {
+    #[cfg(target_os = "macos")]
+    return "Menlo";
+    #[cfg(target_os = "windows")]
+    return "Consolas";
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    return "monospace";
+}
+
 pub fn parse_guifont(guifont: &str) -> ParsedGuiFont {
     let mut result = ParsedGuiFont {
         family: None,

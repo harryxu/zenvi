@@ -4,7 +4,7 @@ pub mod grid;
 use crate::input::key_event_to_nvim;
 use crate::nvim::process::{NvimEvent, NvimSession};
 use crate::{CloseBuffer, Escape, InstallCli, OpenFile, OpenFolder, ReloadNvim};
-use font::parse_guifont;
+use font::{default_font_family, parse_guifont};
 use gpui::*;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -426,7 +426,7 @@ impl ZenviView {
         if let Some(family) = parsed.family {
             self.font_family = family;
         } else if guifont.is_empty() {
-            self.font_family = "Menlo".to_string();
+            self.font_family = default_font_family().to_string();
         }
 
         let size: f32 = if let Some(s) = parsed.size {
@@ -672,7 +672,12 @@ impl Render for ZenviView {
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
                 this.open_paths(paths.paths());
             }))
-            .child(
+            .child({
+                #[cfg(target_os = "macos")]
+                let titlebar_pl = px(78.0);
+                #[cfg(not(target_os = "macos"))]
+                let titlebar_pl = px(12.0);
+
                 // Top Custom Titlebar: Leaves room (pl 78px) for macOS traffic light buttons
                 div()
                     .h(px(32.0))
@@ -681,7 +686,7 @@ impl Render for ZenviView {
                     .flex_row()
                     .items_center()
                     .justify_between()
-                    .pl(px(78.0))
+                    .pl(titlebar_pl)
                     .pr(px(12.0))
                     .bg(rgb(0x161616))
                     .border_b_1()
@@ -711,9 +716,9 @@ impl Render for ZenviView {
                                     .text_size(px(11.0))
                                     .text_color(rgb(0x777777))
                                     .child("⚡️ GPUI"),
-                            ),
-                    ),
-            )
+                            )
+                    )
+            })
             .child(
                 // Editor Main Grid Area
                 div()
