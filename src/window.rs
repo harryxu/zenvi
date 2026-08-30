@@ -25,37 +25,65 @@ pub fn get_safe_default_dir() -> Option<PathBuf> {
     None
 }
 
-pub fn resolve_initial_cwd() -> Option<PathBuf> {
-    // 1. Check CLI arguments
-    if let Some(arg) = std::env::args().nth(1) {
-        let p = PathBuf::from(arg);
-        if p.is_dir() {
-            return Some(p);
-        } else if let Some(parent) = p.parent() {
-            if parent.exists() && parent.as_os_str() != "" {
-                return Some(parent.to_path_buf());
-            }
-        }
-    }
-
-    // 2. Check terminal working directory
-    if let Ok(current) = std::env::current_dir() {
-        if current.as_os_str() != "/" && !current.to_string_lossy().contains(".app/Contents") {
-            if let Ok(home) = std::env::var("HOME") {
-                if current != PathBuf::from(&home) {
-                    return Some(current);
-                }
-            } else {
-                return Some(current);
-            }
-        }
-    }
-
-    // 3. Fallback when launched from Finder/Dock: use a clean app state directory
-    get_safe_default_dir()
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CliLaunchConfig {
+    pub cwd: Option<PathBuf>,
+    pub targets: Vec<PathBuf>,
 }
 
-pub fn open_zenvi_window(cwd: Option<PathBuf>, cx: &mut App) {
+pub fn parse_cli_args<I, S>(args: I, current_dir: Option<PathBuf>) -> CliLaunchConfig
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut targets = Vec::new();
+
+    for arg in args {
+        let s = arg.as_ref();
+        if s.starts_with("-psn_") || s.is_empty() {
+            // Ignore macOS Finder process serial number
+            continue;
+        }
+        let p = PathBuf::from(s);
+        let absolute_path = if p.is_absolute() {
+            p
+        } else if let Some(ref cwd) = current_dir {
+            cwd.join(&p)
+        } else {
+            p
+        };
+        targets.push(absolute_path);
+    }
+
+    let cwd = if let Some(ref cwd) = current_dir {
+        Some(cwd.clone())
+    } else if let Some(first) = targets.first() {
+        if first.is_dir() {
+            Some(first.clone())
+        } else if let Some(parent) = first.parent() {
+            if parent.exists() && parent.as_os_str() != "" {
+                Some(parent.to_path_buf())
+            } else {
+                get_safe_default_dir()
+            }
+        } else {
+            get_safe_default_dir()
+        }
+    } else {
+        get_safe_default_dir()
+    };
+
+    CliLaunchConfig { cwd, targets }
+}
+
+pub fn resolve_cli_launch_config() -> CliLaunchConfig {
+    let current_dir = std::env::current_dir().ok().filter(|c| {
+        c.as_os_str() != "/" && !c.to_string_lossy().contains(".app/Contents")
+    });
+    parse_cli_args(std::env::args().skip(1), current_dir)
+}
+
+pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, cx: &mut App) {
     let window_size = Size::new(px(1080.0), px(720.0));
     let window_count = cx.windows().len();
     let offset = px((window_count as f32 % 10.0) * 28.0);
@@ -86,10 +114,7 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, cx: &mut App) {
 
         let window_handle = window.window_handle();
         let view = cx.new(|cx| {
-            let view = match cwd {
-                Some(dir) => ZenviView::with_cwd(window_handle, Some(dir), cx),
-                None => ZenviView::new(window_handle, cx),
-            };
+            let view = ZenviView::with_cwd_and_targets(window_handle, cwd, targets, cx);
             window.focus(&view.focus_handle);
             view
         });
@@ -97,4 +122,33 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, cx: &mut App) {
         view
     })
     .expect("Failed to open GPUI window");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_cli_args;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_parse_cli_args_files_and_directories() {
+        let cwd = PathBuf::from("/Users/test/workspace");
+        let args = vec!["src/main.rs", "README.md"];
+        let config = parse_cli_args(args, Some(cwd.clone()));
+
+        assert_eq!(config.cwd, Some(cwd.clone()));
+        assert_eq!(config.targets.len(), 2);
+        assert_eq!(config.targets[0], cwd.join("src/main.rs"));
+        assert_eq!(config.targets[1], cwd.join("README.md"));
+    }
+
+    #[test]
+    fn test_parse_cli_args_dot_and_psn() {
+        let cwd = PathBuf::from("/Users/test/workspace");
+        let args = vec!["-psn_0_123456", "."];
+        let config = parse_cli_args(args, Some(cwd.clone()));
+
+        assert_eq!(config.cwd, Some(cwd.clone()));
+        assert_eq!(config.targets.len(), 1);
+        assert_eq!(config.targets[0], cwd.join("."));
+    }
 }

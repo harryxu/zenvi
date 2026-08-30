@@ -3,7 +3,7 @@ pub mod grid;
 
 use crate::input::key_event_to_nvim;
 use crate::nvim::process::{NvimEvent, NvimSession};
-use crate::{CloseBuffer, Escape, OpenFile, OpenFolder, ReloadNvim};
+use crate::{CloseBuffer, Escape, InstallCli, OpenFile, OpenFolder, ReloadNvim};
 use font::parse_guifont;
 use gpui::*;
 use std::path::PathBuf;
@@ -46,13 +46,24 @@ pub struct ZenviView {
 }
 
 impl ZenviView {
+    #[allow(dead_code)]
     pub fn new(window_handle: AnyWindowHandle, cx: &mut Context<Self>) -> Self {
-        Self::with_cwd(window_handle, None, cx)
+        Self::with_cwd_and_targets(window_handle, None, Vec::new(), cx)
     }
 
+    #[allow(dead_code)]
     pub fn with_cwd(
         window_handle: AnyWindowHandle,
         cwd: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::with_cwd_and_targets(window_handle, cwd, Vec::new(), cx)
+    }
+
+    pub fn with_cwd_and_targets(
+        window_handle: AnyWindowHandle,
+        cwd: Option<PathBuf>,
+        targets: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
@@ -80,6 +91,16 @@ impl ZenviView {
 
         if let Some(ref dir) = cwd {
             session.send_command(&format!("cd {}", dir.display()));
+        }
+
+        // Open targets passed via CLI (files or folders)
+        for target in &targets {
+            if target.is_dir() {
+                session.send_command(&format!("cd {}", target.display()));
+                session.send_command(&format!("edit {}", target.display()));
+            } else {
+                session.send_command(&format!("edit {}", target.display()));
+            }
         }
 
         let font_family = "Menlo".to_string();
@@ -324,6 +345,25 @@ impl ZenviView {
         .detach();
     }
 
+    pub fn install_cli(&mut self, _cx: &mut Context<Self>) {
+        match crate::cli::install_shell_command() {
+            Ok(symlink_path) => {
+                log::info!("Shell command successfully installed to {}", symlink_path.display());
+                self.session.send_command(&format!(
+                    "lua pcall(vim.notify, 'Successfully installed \"zenvi\" command to: {}', vim.log.levels.INFO)",
+                    symlink_path.display()
+                ));
+            }
+            Err(e) => {
+                log::error!("Failed to install shell command: {:?}", e);
+                self.session.send_command(&format!(
+                    "lua pcall(vim.notify, 'Failed to install zenvi command: {}', vim.log.levels.ERROR)",
+                    e
+                ));
+            }
+        }
+    }
+
     pub fn close_buffer(&mut self, _cx: &mut Context<Self>) {
         let lua_cmd = r##"lua (function()
             local cur = vim.api.nvim_get_current_buf()
@@ -485,6 +525,9 @@ impl Render for ZenviView {
             .key_context("zenvi")
             .on_action(cx.listener(|this, _: &ReloadNvim, _window, cx| {
                 this.reload_nvim(cx);
+            }))
+            .on_action(cx.listener(|this, _: &InstallCli, _window, cx| {
+                this.install_cli(cx);
             }))
             .on_action(cx.listener(|this, _: &OpenFile, _window, cx| {
                 this.open_file(cx);

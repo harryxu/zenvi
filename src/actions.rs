@@ -11,5 +11,6 @@ actions!(
         CloseBuffer,
         Escape,
         ReloadNvim,
+        InstallCli,
     ]
 );

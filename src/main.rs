@@ -1,6 +1,7 @@
 #![recursion_limit = "512"]
 
 mod actions;
+mod cli;
 mod input;
 mod keymap;
 mod menu;
@@ -30,7 +31,7 @@ fn main() {
         });
 
         cx.on_action(|_: &NewWindow, cx: &mut App| {
-            window::open_zenvi_window(None, cx);
+            window::open_zenvi_window(None, Vec::new(), cx);
         });
 
         cx.on_action(|_: &OpenConfig, cx: &mut App| {
@@ -38,16 +39,28 @@ fn main() {
             if !config_dir.exists() {
                 let _ = std::fs::create_dir_all(&config_dir);
             }
-            window::open_zenvi_window(Some(config_dir), cx);
+            window::open_zenvi_window(Some(config_dir), Vec::new(), cx);
+        });
+
+        cx.on_action(|_: &InstallCli, _cx: &mut App| {
+            match cli::install_shell_command() {
+                Ok(symlink_path) => {
+                    log::info!("Shell command successfully installed to {}", symlink_path.display());
+                }
+                Err(e) => {
+                    log::error!("Failed to install shell command: {:?}", e);
+                }
+            }
         });
 
         // Initialize keyboard shortcuts & macOS application menus
         keymap::init_keymaps(cx);
         menu::init_menus(cx);
 
-        // Open initial window
-        let initial_cwd = window::resolve_initial_cwd();
-        window::open_zenvi_window(initial_cwd, cx);
+        // Open initial window with parsed CLI arguments
+        let launch_config = window::resolve_cli_launch_config();
+        window::open_zenvi_window(launch_config.cwd, launch_config.targets, cx);
     });
 }
+
 

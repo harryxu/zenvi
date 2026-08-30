@@ -9,6 +9,7 @@ pub fn init_menus(cx: &mut App) {
                 MenuItem::action("Open Neovim Config", OpenConfig),
                 MenuItem::separator(),
                 MenuItem::action("Reload Neovim", ReloadNvim),
+                MenuItem::action("Install Shell Command", InstallCli),
                 MenuItem::separator(),
                 MenuItem::action("Quit Zenvi", Quit),
             ],
