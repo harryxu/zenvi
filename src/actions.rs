@@ -12,5 +12,11 @@ actions!(
         Escape,
         ReloadNvim,
         InstallCli,
+        Paste,
+        Copy,
+        Cut,
+        SelectAll,
+        Undo,
+        Redo,
     ]
 );

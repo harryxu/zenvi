@@ -13,7 +13,8 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
     #[cfg(target_os = "macos")]
     if cmd {
         match raw_key {
-            "q" | "Q" | "w" | "W" | "o" | "O" | "r" | "R" | "n" | "N" | "," => return None,
+            "q" | "Q" | "w" | "W" | "o" | "O" | "r" | "R" | "n" | "N" | "," | "v" | "V"
+            | "c" | "C" | "x" | "X" | "a" | "A" | "z" | "Z" => return None,
             _ => {}
         }
     }
@@ -169,5 +170,10 @@ mod tests {
         assert_eq!(key_event_to_nvim(&make_event("r", false, false, false, true)), None);
         assert_eq!(key_event_to_nvim(&make_event("R", false, false, true, true)), None);
         assert_eq!(key_event_to_nvim(&make_event("r", false, false, true, true)), None);
+        assert_eq!(key_event_to_nvim(&make_event("v", false, false, false, true)), None);
+        assert_eq!(key_event_to_nvim(&make_event("c", false, false, false, true)), None);
+        assert_eq!(key_event_to_nvim(&make_event("x", false, false, false, true)), None);
+        assert_eq!(key_event_to_nvim(&make_event("a", false, false, false, true)), None);
+        assert_eq!(key_event_to_nvim(&make_event("z", false, false, false, true)), None);
     }
 }

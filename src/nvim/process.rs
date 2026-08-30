@@ -327,6 +327,20 @@ impl NvimSession {
         let _ = self.tx.send(msg.to_value());
     }
 
+    pub fn paste(&self, data: &str) {
+        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
+        let msg = RpcMessage::Request {
+            msgid: id,
+            method: "nvim_paste".to_string(),
+            params: vec![
+                Value::from(data),
+                Value::from(false),
+                Value::from(-1i64),
+            ],
+        };
+        let _ = self.tx.send(msg.to_value());
+    }
+
     pub fn send_mouse(
         &self,
         button: &str,
@@ -570,6 +584,28 @@ mod tests {
                 }
             }
             assert!(has_cwd);
+
+            session.kill();
+        });
+    }
+
+    #[test]
+    fn test_nvim_paste() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
+            session.attach_ui(80, 24);
+
+            // Paste text into buffer
+            session.paste("Hello from Zenvi Clipboard!");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let res = session
+                .exec_lua("return vim.api.nvim_get_current_line()", vec![])
+                .await
+                .expect("Failed to get line");
+            assert_eq!(res.as_str(), Some("Hello from Zenvi Clipboard!"));
 
             session.kill();
         });

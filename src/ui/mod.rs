@@ -3,7 +3,10 @@ pub mod grid;
 
 use crate::input::key_event_to_nvim;
 use crate::nvim::process::{NvimEvent, NvimSession};
-use crate::{CloseBuffer, Escape, InstallCli, OpenFile, OpenFolder, ReloadNvim};
+use crate::{
+    CloseBuffer, Copy, Cut, Escape, InstallCli, OpenFile, OpenFolder, Paste, Redo, ReloadNvim,
+    SelectAll, Undo,
+};
 use font::{default_font_family, parse_guifont};
 use gpui::*;
 use std::path::PathBuf;
@@ -363,6 +366,62 @@ impl ZenviView {
         }
     }
 
+    pub fn paste(&mut self, cx: &mut Context<Self>) {
+        if let Some(item) = cx.read_from_clipboard() {
+            if let Some(text) = item.text() {
+                self.session.paste(&text);
+            }
+        }
+    }
+
+    pub fn copy(&mut self, _cx: &mut Context<Self>) {
+        self.session.send_command(r#"lua (function()
+            local mode = vim.api.nvim_get_mode().mode
+            if mode:find("[vV\x16]") then
+                vim.cmd('normal! "+y')
+            end
+        end)()"#);
+    }
+
+    pub fn cut(&mut self, _cx: &mut Context<Self>) {
+        self.session.send_command(r#"lua (function()
+            local mode = vim.api.nvim_get_mode().mode
+            if mode:find("[vV\x16]") then
+                vim.cmd('normal! "+d')
+            end
+        end)()"#);
+    }
+
+    pub fn select_all(&mut self, _cx: &mut Context<Self>) {
+        self.session.send_command(r#"lua (function()
+            local mode = vim.api.nvim_get_mode().mode
+            if mode:find("[iR]") then
+                vim.cmd('stopinsert')
+            end
+            vim.cmd('normal! ggVG')
+        end)()"#);
+    }
+
+    pub fn undo(&mut self, _cx: &mut Context<Self>) {
+        self.session.send_command(r#"lua (function()
+            local mode = vim.api.nvim_get_mode().mode
+            if mode:find("[iR]") then
+                vim.cmd('stopinsert')
+            end
+            pcall(vim.cmd, 'undo')
+        end)()"#);
+    }
+
+    pub fn redo(&mut self, _cx: &mut Context<Self>) {
+        self.session.send_command(r#"lua (function()
+            local mode = vim.api.nvim_get_mode().mode
+            if mode:find("[iR]") then
+                vim.cmd('stopinsert')
+            end
+            pcall(vim.cmd, 'redo')
+        end)()"#);
+    }
+
     pub fn install_cli(&mut self, _cx: &mut Context<Self>) {
         match crate::cli::install_shell_command() {
             Ok(symlink_path) => {
@@ -555,6 +614,24 @@ impl Render for ZenviView {
             }))
             .on_action(cx.listener(|this, _: &CloseBuffer, _window, cx| {
                 this.close_buffer(cx);
+            }))
+            .on_action(cx.listener(|this, _: &Paste, _window, cx| {
+                this.paste(cx);
+            }))
+            .on_action(cx.listener(|this, _: &Copy, _window, cx| {
+                this.copy(cx);
+            }))
+            .on_action(cx.listener(|this, _: &Cut, _window, cx| {
+                this.cut(cx);
+            }))
+            .on_action(cx.listener(|this, _: &SelectAll, _window, cx| {
+                this.select_all(cx);
+            }))
+            .on_action(cx.listener(|this, _: &Undo, _window, cx| {
+                this.undo(cx);
+            }))
+            .on_action(cx.listener(|this, _: &Redo, _window, cx| {
+                this.redo(cx);
             }))
             .on_action(cx.listener(|this, _: &Escape, _window, _cx| {
                 this.session.send_input("<Esc>");

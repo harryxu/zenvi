@@ -27,6 +27,18 @@ pub fn init_menus(cx: &mut App) {
                     MenuItem::action("Close Window", CloseBuffer),
                 ],
             },
+            Menu {
+                name: "Edit".into(),
+                items: vec![
+                    MenuItem::action("Undo", Undo),
+                    MenuItem::action("Redo", Redo),
+                    MenuItem::separator(),
+                    MenuItem::action("Cut", Cut),
+                    MenuItem::action("Copy", Copy),
+                    MenuItem::action("Paste", Paste),
+                    MenuItem::action("Select All", SelectAll),
+                ],
+            },
         ]);
     }
 
@@ -48,6 +60,18 @@ pub fn init_menus(cx: &mut App) {
                     MenuItem::action("Close Window", CloseBuffer),
                     MenuItem::separator(),
                     MenuItem::action("Exit", Quit),
+                ],
+            },
+            Menu {
+                name: "Edit".into(),
+                items: vec![
+                    MenuItem::action("Undo", Undo),
+                    MenuItem::action("Redo", Redo),
+                    MenuItem::separator(),
+                    MenuItem::action("Cut", Cut),
+                    MenuItem::action("Copy", Copy),
+                    MenuItem::action("Paste", Paste),
+                    MenuItem::action("Select All", SelectAll),
                 ],
             },
         ]);
