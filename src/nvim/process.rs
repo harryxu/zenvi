@@ -597,7 +597,13 @@ mod tests {
             let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
-            // Paste text into buffer
+            // Wait for nvim to initialize
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            // Enter insert mode and paste text into buffer
+            session.send_input("i");
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
             session.paste("Hello from Zenvi Clipboard!");
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 

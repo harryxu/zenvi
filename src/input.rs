@@ -72,7 +72,7 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
         return Some(format!("<{}{}>", prefix, name));
     }
 
-    // Single character with modifiers
+    // Single character with modifiers (Ctrl, Alt, Cmd)
     if ctrl || alt || cmd {
         let mut prefix = String::new();
         if ctrl {
@@ -90,21 +90,8 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
         return Some(format!("<{}{}>", prefix, raw_key));
     }
 
-    // Normal text input
-    if let Some(ref ch) = event.keystroke.key_char {
-        if ch == "<" {
-            return Some("<lt>".to_string());
-        }
-        return Some(ch.to_string());
-    }
-
-    if raw_key.chars().count() == 1 {
-        if raw_key == "<" {
-            return Some("<lt>".to_string());
-        }
-        return Some(raw_key.to_string());
-    }
-
+    // Plain characters without modifiers are routed through EntityInputHandler (replace_text_in_range)
+    // so that IME (Chinese, Japanese, etc.) composition and candidate selection work seamlessly.
     None
 }
 
@@ -173,7 +160,14 @@ mod tests {
         assert_eq!(key_event_to_nvim(&make_event("v", false, false, false, true)), None);
         assert_eq!(key_event_to_nvim(&make_event("c", false, false, false, true)), None);
         assert_eq!(key_event_to_nvim(&make_event("x", false, false, false, true)), None);
-        assert_eq!(key_event_to_nvim(&make_event("a", false, false, false, true)), None);
-        assert_eq!(key_event_to_nvim(&make_event("z", false, false, false, true)), None);
+        assert!(key_event_to_nvim(&make_event("z", false, false, false, true)).is_none());
+    }
+
+    #[test]
+    fn test_plain_characters_route_to_input_handler() {
+        assert_eq!(key_event_to_nvim(&make_event("a", false, false, false, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("c", false, false, false, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("e", false, false, false, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("1", false, false, false, false)), None);
     }
 }

@@ -45,6 +45,7 @@ pub struct ZenviView {
     pub is_mouse_down: bool,
     pub scroll_accum_y: f32,
     pub cwd: Option<PathBuf>,
+    pub marked_text: Option<String>,
     _event_task: Option<Task<()>>,
 }
 
@@ -135,6 +136,7 @@ impl ZenviView {
             is_mouse_down: false,
             scroll_accum_y: 0.0,
             cwd,
+            marked_text: None,
             _event_task: Some(event_task),
         }
     }
@@ -650,6 +652,9 @@ impl Render for ZenviView {
                 .size_0(),
             )
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, _cx| {
+                if this.marked_text.is_some() {
+                    return;
+                }
                 if let Some(nvim_key) = key_event_to_nvim(event) {
                     this.session.send_input(&nvim_key);
                 }
@@ -810,11 +815,20 @@ impl Render for ZenviView {
 impl EntityInputHandler for ZenviView {
     fn text_for_range(
         &mut self,
-        _range_utf16: std::ops::Range<usize>,
-        _actual_range: &mut Option<std::ops::Range<usize>>,
+        range_utf16: std::ops::Range<usize>,
+        actual_range: &mut Option<std::ops::Range<usize>>,
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
+        if let Some(ref text) = self.marked_text {
+            let u16_chars: Vec<u16> = text.encode_utf16().collect();
+            let start = range_utf16.start.min(u16_chars.len());
+            let end = range_utf16.end.min(u16_chars.len());
+            if start <= end {
+                *actual_range = Some(start..end);
+                return Some(String::from_utf16_lossy(&u16_chars[start..end]));
+            }
+        }
         None
     }
 
@@ -824,8 +838,13 @@ impl EntityInputHandler for ZenviView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
+        let len = self
+            .marked_text
+            .as_ref()
+            .map(|t| t.encode_utf16().count())
+            .unwrap_or(0);
         Some(UTF16Selection {
-            range: 0..0,
+            range: len..len,
             reversed: false,
         })
     }
@@ -835,10 +854,14 @@ impl EntityInputHandler for ZenviView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<std::ops::Range<usize>> {
-        None
+        self.marked_text
+            .as_ref()
+            .map(|t| 0..t.encode_utf16().count())
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
+    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.marked_text = None;
+    }
 
     fn replace_text_in_range(
         &mut self,
@@ -847,19 +870,29 @@ impl EntityInputHandler for ZenviView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) {
-        if !new_text.is_empty() && (!new_text.is_ascii() || new_text.len() > 1) {
-            self.session.send_input(new_text);
+        self.marked_text = None;
+        if !new_text.is_empty() {
+            if new_text == "<" {
+                self.session.send_input("<lt>");
+            } else {
+                self.session.send_input(new_text);
+            }
         }
     }
 
     fn replace_and_mark_text_in_range(
         &mut self,
         _range_utf16: Option<std::ops::Range<usize>>,
-        _new_text: &str,
+        new_text: &str,
         _new_selected_range_utf16: Option<std::ops::Range<usize>>,
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) {
+        if new_text.is_empty() {
+            self.marked_text = None;
+        } else {
+            self.marked_text = Some(new_text.to_string());
+        }
     }
 
     fn bounds_for_range(
@@ -869,7 +902,21 @@ impl EntityInputHandler for ZenviView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        Some(element_bounds)
+        let state = self.session.state.read();
+        let (cursor_row, cursor_col) = state
+            .grids
+            .get(&1)
+            .map(|g| (g.cursor_row, g.cursor_col))
+            .unwrap_or((0, 0));
+        drop(state);
+
+        let x = cursor_col as f32 * self.char_width;
+        let y = 32.0 + cursor_row as f32 * f32::from(self.line_height);
+        let cursor_bounds = Bounds::new(
+            Point::new(element_bounds.origin.x + px(x), element_bounds.origin.y + px(y)),
+            Size::new(px(self.char_width), self.line_height),
+        );
+        Some(cursor_bounds)
     }
 
     fn character_index_for_point(
