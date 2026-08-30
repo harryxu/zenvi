@@ -20,6 +20,26 @@
     <string>zenvi</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>All Files and Folders</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.item</string>
+                <string>public.data</string>
+                <string>public.content</string>
+                <string>public.folder</string>
+                <string>public.directory</string>
+                <string>com.apple.package</string>
+            </array>
+        </dict>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>10.15.0</string>
     <key>NSHighResolutionCapable</key>

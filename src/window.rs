@@ -83,6 +83,38 @@ pub fn resolve_cli_launch_config() -> CliLaunchConfig {
     parse_cli_args(std::env::args().skip(1), current_dir)
 }
 
+pub fn decode_percent(s: &str) -> String {
+    let mut result = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16) {
+                result.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&result).into_owned()
+}
+
+pub fn url_to_path(url_str: &str) -> Option<PathBuf> {
+    let s = if let Some(stripped) = url_str.strip_prefix("file://") {
+        stripped
+    } else {
+        url_str
+    };
+    let decoded = decode_percent(s);
+    if decoded.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(decoded))
+    }
+}
+
 pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, cx: &mut App) {
     let window_size = Size::new(px(1080.0), px(720.0));
     let window_count = cx.windows().len();
@@ -126,7 +158,7 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, cx: &mut A
 
 #[cfg(test)]
 mod tests {
-    use super::parse_cli_args;
+    use super::{parse_cli_args, url_to_path};
     use std::path::PathBuf;
 
     #[test]
@@ -150,5 +182,26 @@ mod tests {
         assert_eq!(config.cwd, Some(cwd.clone()));
         assert_eq!(config.targets.len(), 1);
         assert_eq!(config.targets[0], cwd.join("."));
+    }
+
+    #[test]
+    fn test_url_to_path_decoding() {
+        let u1 = "file:///Users/harry/project/src/main.rs";
+        assert_eq!(
+            url_to_path(u1),
+            Some(PathBuf::from("/Users/harry/project/src/main.rs"))
+        );
+
+        let u2 = "file:///Users/harry/my%20folder/my%20file.txt";
+        assert_eq!(
+            url_to_path(u2),
+            Some(PathBuf::from("/Users/harry/my folder/my file.txt"))
+        );
+
+        let u3 = "file:///Users/harry/%E4%B8%AD%E6%96%87%E7%9B%AE%E5%BD%95";
+        assert_eq!(
+            url_to_path(u3),
+            Some(PathBuf::from("/Users/harry/中文目录"))
+        );
     }
 }

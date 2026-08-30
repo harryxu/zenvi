@@ -345,6 +345,24 @@ impl ZenviView {
         .detach();
     }
 
+    pub fn open_paths(&mut self, paths: &[PathBuf]) {
+        for path in paths {
+            if path.is_dir() {
+                self.cwd = Some(path.clone());
+                self.session.send_command(&format!("cd {}", path.display()));
+                self.session.send_command(&format!("edit {}", path.display()));
+            } else {
+                if let Some(parent) = path.parent() {
+                    if parent.exists() && parent.as_os_str() != "" {
+                        self.cwd = Some(parent.to_path_buf());
+                        self.session.send_command(&format!("cd {}", parent.display()));
+                    }
+                }
+                self.session.send_command(&format!("edit {}", path.display()));
+            }
+        }
+    }
+
     pub fn install_cli(&mut self, _cx: &mut Context<Self>) {
         match crate::cli::install_shell_command() {
             Ok(symlink_path) => {
@@ -652,19 +670,7 @@ impl Render for ZenviView {
                 }
             }))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
-                for path in paths.paths() {
-                    if path.is_dir() {
-                        this.cwd = Some(path.clone());
-                        this.session.send_command(&format!("cd {}", path.display()));
-                        this.session.send_command(&format!("edit {}", path.display()));
-                    } else {
-                        if let Some(parent) = path.parent() {
-                            this.cwd = Some(parent.to_path_buf());
-                            this.session.send_command(&format!("cd {}", parent.display()));
-                        }
-                        this.session.send_command(&format!("edit {}", path.display()));
-                    }
-                }
+                this.open_paths(paths.paths());
             }))
             .child(
                 // Top Custom Titlebar: Leaves room (pl 78px) for macOS traffic light buttons
