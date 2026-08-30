@@ -7,6 +7,7 @@
   **A standalone, GPU-accelerated Neovim GUI frontend built with [GPUI](https://gpui.rs/).**
 
 </div>
+
 ---
 
 ## ✨ Features
