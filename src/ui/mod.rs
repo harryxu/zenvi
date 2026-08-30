@@ -553,10 +553,48 @@ impl Render for ZenviView {
 
         let state = self.session.state.read();
         let default_bg = state.default_bg;
+        let default_fg = state.default_fg;
         let title = if state.title.is_empty() {
             "Zenvi".to_string()
         } else {
             state.title.clone()
+        };
+
+        // Derive titlebar colors harmoniously from Neovim's active theme
+        let (bg_r, bg_g, bg_b) = (
+            ((default_bg >> 16) & 0xff) as f32,
+            ((default_bg >> 8) & 0xff) as f32,
+            (default_bg & 0xff) as f32,
+        );
+        let luminance = 0.299 * bg_r + 0.587 * bg_g + 0.114 * bg_b;
+        let is_dark = luminance < 128.0;
+
+        let title_color = rgb(default_fg);
+        let badge_color = if is_dark {
+            rgb(
+                (((bg_r + 80.0).min(200.0) as u32) << 16)
+                    | (((bg_g + 80.0).min(200.0) as u32) << 8)
+                    | ((bg_b + 80.0).min(200.0) as u32),
+            )
+        } else {
+            rgb(
+                ((((bg_r - 80.0).max(60.0)) as u32) << 16)
+                    | ((((bg_g - 80.0).max(60.0)) as u32) << 8)
+                    | (((bg_b - 80.0).max(60.0)) as u32),
+            )
+        };
+        let border_color = if is_dark {
+            rgb(
+                (((bg_r + 18.0).min(255.0) as u32) << 16)
+                    | (((bg_g + 18.0).min(255.0) as u32) << 8)
+                    | ((bg_b + 18.0).min(255.0) as u32),
+            )
+        } else {
+            rgb(
+                ((((bg_r - 25.0).max(0.0)) as u32) << 16)
+                    | ((((bg_g - 25.0).max(0.0)) as u32) << 8)
+                    | (((bg_b - 25.0).max(0.0)) as u32),
+            )
         };
 
         let grid = state
@@ -770,9 +808,9 @@ impl Render for ZenviView {
                     .justify_between()
                     .pl(titlebar_pl)
                     .pr(px(12.0))
-                    .bg(rgb(0x161616))
+                    .bg(rgb(default_bg))
                     .border_b_1()
-                    .border_color(rgb(0x222222))
+                    .border_color(border_color)
                     .child(
                         div()
                             .flex()
@@ -783,7 +821,7 @@ impl Render for ZenviView {
                                 div()
                                     .text_size(px(12.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0xdcdcdc))
+                                    .text_color(title_color)
                                     .child(title),
                             ),
                     )
@@ -796,7 +834,7 @@ impl Render for ZenviView {
                             .child(
                                 div()
                                     .text_size(px(11.0))
-                                    .text_color(rgb(0x777777))
+                                    .text_color(badge_color)
                                     .child("⚡️ GPUI"),
                             )
                     )
