@@ -30,6 +30,11 @@ fn mods_to_nvim(mods: &Modifiers) -> String {
     s
 }
 
+pub const TITLEBAR_HEIGHT: f32 = 36.0;
+pub const GRID_PADDING_TOP: f32 = 6.0;
+pub const GRID_PADDING_LEFT: f32 = 4.0;
+pub const TOP_OFFSET: f32 = TITLEBAR_HEIGHT + GRID_PADDING_TOP;
+
 pub struct ZenviView {
     pub session: Arc<NvimSession>,
     pub focus_handle: FocusHandle,
@@ -520,12 +525,10 @@ impl ZenviView {
         let x: f32 = pos.x.into();
         let y: f32 = pos.y.into();
 
-        // Titlebar height: 32.0
-        let top_offset = 32.0;
         let lh: f32 = self.line_height.into();
 
-        let col = (x / self.char_width).floor().max(0.0) as usize;
-        let row = ((y - top_offset) / lh).floor().max(0.0) as usize;
+        let col = ((x - GRID_PADDING_LEFT) / self.char_width).floor().max(0.0) as usize;
+        let row = ((y - TOP_OFFSET) / lh).floor().max(0.0) as usize;
 
         (
             col.min(self.last_cols.saturating_sub(1)),
@@ -607,12 +610,10 @@ impl Render for ZenviView {
         let window_w: f32 = viewport.width.into();
         let window_h: f32 = viewport.height.into();
 
-        // Titlebar height: 32px
-        let top_offset = 32.0;
         let lh: f32 = self.line_height.into();
 
-        let cols = (window_w / self.char_width).floor().max(20.0) as usize;
-        let rows = ((window_h - top_offset) / lh).floor().max(5.0) as usize;
+        let cols = ((window_w - GRID_PADDING_LEFT) / self.char_width).floor().max(20.0) as usize;
+        let rows = ((window_h - TOP_OFFSET) / lh).floor().max(5.0) as usize;
 
         if cols != self.last_cols || rows != self.last_rows {
             self.last_cols = cols;
@@ -800,7 +801,7 @@ impl Render for ZenviView {
 
                 // Top Custom Titlebar: Leaves room (pl 78px) for macOS traffic light buttons
                 div()
-                    .h(px(32.0))
+                    .h(px(TITLEBAR_HEIGHT))
                     .w_full()
                     .flex()
                     .flex_row()
@@ -844,6 +845,8 @@ impl Render for ZenviView {
                 div()
                     .flex_1()
                     .w_full()
+                    .pt(px(GRID_PADDING_TOP))
+                    .pl(px(GRID_PADDING_LEFT))
                     .overflow_hidden()
                     .child(grid_element),
             )
@@ -948,8 +951,8 @@ impl EntityInputHandler for ZenviView {
             .unwrap_or((0, 0));
         drop(state);
 
-        let x = cursor_col as f32 * self.char_width;
-        let y = 32.0 + cursor_row as f32 * f32::from(self.line_height);
+        let x = GRID_PADDING_LEFT + cursor_col as f32 * self.char_width;
+        let y = TOP_OFFSET + cursor_row as f32 * f32::from(self.line_height);
         let cursor_bounds = Bounds::new(
             Point::new(element_bounds.origin.x + px(x), element_bounds.origin.y + px(y)),
             Size::new(px(self.char_width), self.line_height),

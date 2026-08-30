@@ -167,7 +167,7 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, cx: &mut A
         window_options.titlebar = Some(TitlebarOptions {
             title: Some("Zenvi".into()),
             appears_transparent: true,
-            traffic_light_position: Some(Point::new(px(12.0), px(10.0))),
+            traffic_light_position: Some(Point::new(px(12.0), px(12.0))),
         });
     }
     #[cfg(not(target_os = "macos"))]
