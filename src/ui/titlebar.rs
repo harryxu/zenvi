@@ -4,6 +4,7 @@ use crate::nvim::state::NvimState;
 use gpui::prelude::*;
 use gpui::*;
 
+#[cfg(not(target_os = "macos"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveMenu {
     File,
@@ -15,8 +16,11 @@ pub struct TitlebarStyle {
     pub title_color: Rgba,
     pub badge_color: Rgba,
     pub border_color: Rgba,
+    #[cfg(not(target_os = "macos"))]
     pub menu_hover_bg: Rgba,
+    #[cfg(not(target_os = "macos"))]
     pub menu_active_bg: Rgba,
+    #[cfg(not(target_os = "macos"))]
     pub dropdown_bg: Rgba,
 }
 
@@ -65,6 +69,7 @@ pub fn derive_titlebar_style(default_bg: u32, default_fg: u32) -> TitlebarStyle 
         ))
     };
 
+    #[cfg(not(target_os = "macos"))]
     let menu_hover_bg = if is_dark {
         rgb(pack_rgb(
             (bg_r + 20.0).min(255.0),
@@ -79,6 +84,7 @@ pub fn derive_titlebar_style(default_bg: u32, default_fg: u32) -> TitlebarStyle 
         ))
     };
 
+    #[cfg(not(target_os = "macos"))]
     let menu_active_bg = if is_dark {
         rgb(pack_rgb(
             (bg_r + 35.0).min(255.0),
@@ -93,6 +99,7 @@ pub fn derive_titlebar_style(default_bg: u32, default_fg: u32) -> TitlebarStyle 
         ))
     };
 
+    #[cfg(not(target_os = "macos"))]
     let dropdown_bg = if is_dark {
         rgb(pack_rgb(
             (bg_r + 14.0).min(255.0),
@@ -111,14 +118,19 @@ pub fn derive_titlebar_style(default_bg: u32, default_fg: u32) -> TitlebarStyle 
         title_color,
         badge_color,
         border_color,
+        #[cfg(not(target_os = "macos"))]
         menu_hover_bg,
+        #[cfg(not(target_os = "macos"))]
         menu_active_bg,
+        #[cfg(not(target_os = "macos"))]
         dropdown_bg,
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 type MenuAction = Box<dyn Fn(&mut ZenviView, &mut Window, &mut Context<ZenviView>) + 'static>;
 
+#[cfg(not(target_os = "macos"))]
 struct DropdownItem {
     label: &'static str,
     shortcut: &'static str,
@@ -126,6 +138,7 @@ struct DropdownItem {
     action: Option<MenuAction>,
 }
 
+#[cfg(not(target_os = "macos"))]
 impl DropdownItem {
     fn action<F>(label: &'static str, shortcut: &'static str, f: F) -> Self
     where
@@ -149,6 +162,7 @@ impl DropdownItem {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn file_menu_items() -> Vec<DropdownItem> {
     vec![
         DropdownItem::action("New Window", "Ctrl+Shift+N", |this, _window, cx| {
@@ -186,6 +200,7 @@ fn file_menu_items() -> Vec<DropdownItem> {
     ]
 }
 
+#[cfg(not(target_os = "macos"))]
 fn edit_menu_items() -> Vec<DropdownItem> {
     vec![
         DropdownItem::action("Undo", "Ctrl+Shift+Z", |this, _window, cx| {
@@ -210,6 +225,7 @@ fn edit_menu_items() -> Vec<DropdownItem> {
     ]
 }
 
+#[cfg(not(target_os = "macos"))]
 fn render_dropdown(
     items: Vec<DropdownItem>,
     left_offset: Pixels,
@@ -282,6 +298,7 @@ fn render_dropdown(
 }
 
 /// Exported dropdown renderer to mount at root level with topmost z-index
+#[cfg(not(target_os = "macos"))]
 pub fn render_menu_dropdown(
     active: ActiveMenu,
     state: &NvimState,
@@ -294,13 +311,12 @@ pub fn render_menu_dropdown(
     }
 }
 
-/// Builds the custom titlebar element directly from Neovim's state.
+/// Builds the custom titlebar element directly from Neovim's state (macOS version).
+#[cfg(target_os = "macos")]
 pub fn render_titlebar(
     state: &NvimState,
-    active_menu: Option<ActiveMenu>,
     cx: &mut Context<ZenviView>,
 ) -> Stateful<Div> {
-    #[cfg(target_os = "macos")]
     let title = if state.title.is_empty() {
         "Zenvi"
     } else {
@@ -309,17 +325,20 @@ pub fn render_titlebar(
     let style = derive_titlebar_style(state.default_bg, state.default_fg);
     let default_bg = state.default_bg;
 
-    #[cfg(target_os = "macos")]
-    let titlebar_pl = px(78.0);
-    #[cfg(not(target_os = "macos"))]
-    let titlebar_pl = px(12.0);
+    let left_side = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .child(
+            div()
+                .text_size(px(12.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(style.title_color)
+                .child(title.to_string()),
+        );
 
-    #[cfg(not(target_os = "macos"))]
-    let file_active = active_menu == Some(ActiveMenu::File);
-    #[cfg(not(target_os = "macos"))]
-    let edit_active = active_menu == Some(ActiveMenu::Edit);
-
-    let mut titlebar_div = div()
+    div()
         .id("zenvi-titlebar")
         .relative()
         .h(px(TITLEBAR_HEIGHT))
@@ -328,7 +347,7 @@ pub fn render_titlebar(
         .flex_row()
         .items_center()
         .justify_between()
-        .pl(titlebar_pl)
+        .pl(px(78.0))
         .pr(px(12.0))
         .bg(rgb(default_bg))
         .border_b_1()
@@ -341,10 +360,36 @@ pub fn render_titlebar(
                     window.titlebar_double_click();
                 }
             }),
-        );
+        )
+        .child(left_side)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(style.badge_color)
+                        .child("⚡️ GPUI"),
+                ),
+        )
+}
 
-    // Left side: [File] [Edit] on Linux/Windows, followed by window title
-    #[cfg(not(target_os = "macos"))]
+/// Builds the custom titlebar element directly from Neovim's state (Linux / Windows version).
+#[cfg(not(target_os = "macos"))]
+pub fn render_titlebar(
+    state: &NvimState,
+    active_menu: Option<ActiveMenu>,
+    cx: &mut Context<ZenviView>,
+) -> Stateful<Div> {
+    let style = derive_titlebar_style(state.default_bg, state.default_fg);
+    let default_bg = state.default_bg;
+
+    let file_active = active_menu == Some(ActiveMenu::File);
+    let edit_active = active_menu == Some(ActiveMenu::Edit);
+
     let left_side = div()
         .flex()
         .flex_row()
@@ -420,33 +465,41 @@ pub fn render_titlebar(
                 ),
         );
 
-    #[cfg(target_os = "macos")]
-    let left_side = div()
+    div()
+        .id("zenvi-titlebar")
+        .relative()
+        .h(px(TITLEBAR_HEIGHT))
+        .w_full()
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(8.0))
+        .justify_between()
+        .pl(px(12.0))
+        .pr(px(12.0))
+        .bg(rgb(default_bg))
+        .border_b_1()
+        .border_color(style.border_color)
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|_this, event: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                if event.click_count == 2 {
+                    window.titlebar_double_click();
+                }
+            }),
+        )
+        .child(left_side)
         .child(
             div()
-                .text_size(px(12.0))
-                .font_weight(FontWeight::BOLD)
-                .text_color(style.title_color)
-                .child(title.to_string()),
-        );
-
-    titlebar_div = titlebar_div.child(left_side).child(
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.0))
-            .child(
-                div()
-                    .text_size(px(11.0))
-                    .text_color(style.badge_color)
-                    .child("⚡️ GPUI"),
-            ),
-    );
-
-    titlebar_div
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(style.badge_color)
+                        .child("⚡️ GPUI"),
+                ),
+        )
 }

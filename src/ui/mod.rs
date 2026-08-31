@@ -38,6 +38,7 @@ pub struct ZenviView {
     pub scroll_accum_y: f32,
     pub cwd: Option<PathBuf>,
     pub marked_text: Option<String>,
+    #[cfg(not(target_os = "macos"))]
     pub active_menu: Option<titlebar::ActiveMenu>,
     pub(crate) _event_task: Option<Task<()>>,
 }
@@ -130,6 +131,7 @@ impl ZenviView {
             scroll_accum_y: 0.0,
             cwd,
             marked_text: None,
+            #[cfg(not(target_os = "macos"))]
             active_menu: None,
             _event_task: Some(event_task),
         }
@@ -349,11 +351,12 @@ impl Render for ZenviView {
                 .size_0(),
             )
             // Keyboard input
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, _cx| {
+                #[cfg(not(target_os = "macos"))]
                 if this.active_menu.is_some() {
                     let is_esc = event.keystroke.key == "escape" || event.keystroke.key == "Esc" || event.keystroke.key == "\u{1b}";
                     this.active_menu = None;
-                    cx.notify();
+                    _cx.notify();
                     if is_esc {
                         return;
                     }
@@ -368,11 +371,16 @@ impl Render for ZenviView {
 
         let root = Self::bind_mouse_handlers(root, cx);
 
-        let mut root = root
+        #[cfg(target_os = "macos")]
+        let titlebar_element = titlebar::render_titlebar(&state, cx);
+        #[cfg(not(target_os = "macos"))]
+        let titlebar_element = titlebar::render_titlebar(&state, self.active_menu, cx);
+
+        let root = root
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
                 this.open_paths(paths.paths());
             }))
-            .child(titlebar::render_titlebar(&state, self.active_menu, cx))
+            .child(titlebar_element)
             .child(
                 div()
                     .flex_1()
@@ -384,9 +392,11 @@ impl Render for ZenviView {
             );
 
         #[cfg(not(target_os = "macos"))]
-        if let Some(active) = self.active_menu {
-            root = root.child(titlebar::render_menu_dropdown(active, &state, cx));
-        }
+        let root = if let Some(active) = self.active_menu {
+            root.child(titlebar::render_menu_dropdown(active, &state, cx))
+        } else {
+            root
+        };
 
         root
     }

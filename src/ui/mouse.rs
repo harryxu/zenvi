@@ -46,7 +46,10 @@ impl ZenviView {
         modifiers: &Modifiers,
         window: &mut Window,
     ) {
-        self.active_menu = None;
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.active_menu = None;
+        }
         window.focus(&self.focus_handle);
         if button == "left" {
             self.is_mouse_down = true;
