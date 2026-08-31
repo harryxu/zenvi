@@ -165,7 +165,7 @@ impl ZenviView {
 
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Check for guifont / linespace changes from Neovim
+        // Sync font settings from Neovim state
         let (guifont_changed, new_guifont, new_linespace) = {
             let state = self.session.state.read();
             if state.guifont != self.last_guifont || state.linespace != self.last_linespace {
@@ -181,6 +181,7 @@ impl Render for ZenviView {
             self.update_font(&new_guifont, new_linespace, cx);
         }
 
+        // Read Neovim state for rendering
         let state = self.session.state.read();
         let default_bg = state.default_bg;
         let default_fg = state.default_fg;
@@ -198,10 +199,10 @@ impl Render for ZenviView {
             .cloned()
             .unwrap_or_else(|| crate::nvim::state::Grid::new(1, 80, 24));
 
+        // Calculate grid dimensions and notify Neovim of resize
         let viewport = window.viewport_size();
         let window_w: f32 = viewport.width.into();
         let window_h: f32 = viewport.height.into();
-
         let lh: f32 = self.line_height.into();
 
         let cols = ((window_w - GRID_PADDING_LEFT) / self.char_width)
@@ -227,51 +228,19 @@ impl Render for ZenviView {
         let focus_handle = self.focus_handle.clone();
         let entity = cx.entity().clone();
 
-        div()
+        // Build root element tree
+        let root = div()
             .id("zenvi-root")
             .size_full()
             .flex()
             .flex_col()
             .bg(rgb(default_bg))
             .track_focus(&self.focus_handle)
-            .key_context("zenvi")
-            // Action bindings
-            .on_action(cx.listener(|this, _: &ReloadNvim, _window, cx| {
-                this.reload_nvim(cx);
-            }))
-            .on_action(cx.listener(|this, _: &InstallCli, _window, cx| {
-                this.install_cli(cx);
-            }))
-            .on_action(cx.listener(|this, _: &OpenFile, _window, cx| {
-                this.open_file(cx);
-            }))
-            .on_action(cx.listener(|this, _: &OpenFolder, _window, cx| {
-                this.open_folder(cx);
-            }))
-            .on_action(cx.listener(|this, _: &CloseBuffer, _window, cx| {
-                this.close_buffer(cx);
-            }))
-            .on_action(cx.listener(|this, _: &Paste, _window, cx| {
-                this.paste(cx);
-            }))
-            .on_action(cx.listener(|this, _: &Copy, _window, cx| {
-                this.copy(cx);
-            }))
-            .on_action(cx.listener(|this, _: &Cut, _window, cx| {
-                this.cut(cx);
-            }))
-            .on_action(cx.listener(|this, _: &SelectAll, _window, cx| {
-                this.select_all(cx);
-            }))
-            .on_action(cx.listener(|this, _: &Undo, _window, cx| {
-                this.undo(cx);
-            }))
-            .on_action(cx.listener(|this, _: &Redo, _window, cx| {
-                this.redo(cx);
-            }))
-            .on_action(cx.listener(|this, _: &Escape, _window, _cx| {
-                this.session.send_input("<Esc>");
-            }))
+            .key_context("zenvi");
+
+        let root = Self::bind_actions(root, cx);
+
+        let root = root
             // IME input handler canvas
             .child(
                 canvas(
@@ -294,65 +263,112 @@ impl Render for ZenviView {
                 if let Some(nvim_key) = key_event_to_nvim(event) {
                     this.session.send_input(&nvim_key);
                 }
-            }))
-            // Mouse event handlers
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                    this.handle_mouse_down("left", event.position, &event.modifiers, window);
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                    this.handle_mouse_down("right", event.position, &event.modifiers, window);
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Middle,
-                cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                    this.handle_mouse_down("middle", event.position, &event.modifiers, window);
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                    this.handle_mouse_up("left", event.position, &event.modifiers);
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Right,
-                cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                    this.handle_mouse_up("right", event.position, &event.modifiers);
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Middle,
-                cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                    this.handle_mouse_up("middle", event.position, &event.modifiers);
-                }),
-            )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, _cx| {
-                this.handle_mouse_move(event);
-            }))
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
-                this.handle_scroll_wheel(event);
-            }))
-            // Drag-and-drop
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
-                this.open_paths(paths.paths());
-            }))
-            // Titlebar
-            .child(titlebar::render_titlebar(&title, &style, default_bg, cx))
-            // Editor grid area
-            .child(
-                div()
-                    .flex_1()
-                    .w_full()
-                    .pt(px(GRID_PADDING_TOP))
-                    .pl(px(GRID_PADDING_LEFT))
-                    .overflow_hidden()
-                    .child(grid_element),
-            )
+            }));
+
+        let root = Self::bind_mouse_handlers(root, cx);
+
+        root.on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
+            this.open_paths(paths.paths());
+        }))
+        .child(titlebar::render_titlebar(&title, &style, default_bg, cx))
+        .child(
+            div()
+                .flex_1()
+                .w_full()
+                .pt(px(GRID_PADDING_TOP))
+                .pl(px(GRID_PADDING_LEFT))
+                .overflow_hidden()
+                .child(grid_element),
+        )
     }
 }
+
+/// Render helper methods for binding actions and event handlers.
+impl ZenviView {
+    /// Binds all GPUI action handlers to the root element.
+    fn bind_actions(root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+        root.on_action(cx.listener(|this, _: &ReloadNvim, _window, cx| {
+            this.reload_nvim(cx);
+        }))
+        .on_action(cx.listener(|this, _: &InstallCli, _window, cx| {
+            this.install_cli(cx);
+        }))
+        .on_action(cx.listener(|this, _: &OpenFile, _window, cx| {
+            this.open_file(cx);
+        }))
+        .on_action(cx.listener(|this, _: &OpenFolder, _window, cx| {
+            this.open_folder(cx);
+        }))
+        .on_action(cx.listener(|this, _: &CloseBuffer, _window, cx| {
+            this.close_buffer(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Paste, _window, cx| {
+            this.paste(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Copy, _window, cx| {
+            this.copy(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Cut, _window, cx| {
+            this.cut(cx);
+        }))
+        .on_action(cx.listener(|this, _: &SelectAll, _window, cx| {
+            this.select_all(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Undo, _window, cx| {
+            this.undo(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Redo, _window, cx| {
+            this.redo(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Escape, _window, _cx| {
+            this.session.send_input("<Esc>");
+        }))
+    }
+
+    /// Binds all mouse and scroll event handlers to the root element.
+    fn bind_mouse_handlers(root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+        root.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
+                this.handle_mouse_down("left", event.position, &event.modifiers, window);
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
+                this.handle_mouse_down("right", event.position, &event.modifiers, window);
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Middle,
+            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
+                this.handle_mouse_down("middle", event.position, &event.modifiers, window);
+            }),
+        )
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
+                this.handle_mouse_up("left", event.position, &event.modifiers);
+            }),
+        )
+        .on_mouse_up(
+            MouseButton::Right,
+            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
+                this.handle_mouse_up("right", event.position, &event.modifiers);
+            }),
+        )
+        .on_mouse_up(
+            MouseButton::Middle,
+            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
+                this.handle_mouse_up("middle", event.position, &event.modifiers);
+            }),
+        )
+        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, _cx| {
+            this.handle_mouse_move(event);
+        }))
+        .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
+            this.handle_scroll_wheel(event);
+        }))
+    }
+}
+
