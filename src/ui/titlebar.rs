@@ -61,13 +61,21 @@ pub fn derive_titlebar_style(default_bg: u32, default_fg: u32) -> TitlebarStyle 
     }
 }
 
-/// Builds the custom titlebar element with title text and theme badge.
+use crate::nvim::state::NvimState;
+
+/// Builds the custom titlebar element directly from Neovim's state.
 pub fn render_titlebar(
-    title: &str,
-    style: &TitlebarStyle,
-    default_bg: u32,
+    state: &NvimState,
     cx: &mut Context<ZenviView>,
 ) -> Stateful<Div> {
+    let title = if state.title.is_empty() {
+        "Zenvi"
+    } else {
+        &state.title
+    };
+    let style = derive_titlebar_style(state.default_bg, state.default_fg);
+    let default_bg = state.default_bg;
+
     #[cfg(target_os = "macos")]
     let titlebar_pl = px(78.0);
     #[cfg(not(target_os = "macos"))]

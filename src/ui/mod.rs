@@ -256,14 +256,6 @@ impl Render for ZenviView {
         // Read Neovim state for rendering
         let state = self.session.state.read();
         let default_bg = state.default_bg;
-        let default_fg = state.default_fg;
-        let title = if state.title.is_empty() {
-            "Zenvi".to_string()
-        } else {
-            state.title.clone()
-        };
-
-        let style = titlebar::derive_titlebar_style(default_bg, default_fg);
 
         let grid = state
             .grids
@@ -342,7 +334,7 @@ impl Render for ZenviView {
         root.on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
             this.open_paths(paths.paths());
         }))
-        .child(titlebar::render_titlebar(&title, &style, default_bg, cx))
+        .child(titlebar::render_titlebar(&state, cx))
         .child(
             div()
                 .flex_1()
