@@ -86,10 +86,22 @@ impl NvimSession {
         cwd: Option<PathBuf>,
         targets: Vec<PathBuf>,
     ) -> Result<Arc<Self>> {
+        Self::spawn_with_options(event_tx, cwd, targets, false)
+    }
+
+    pub fn spawn_with_options(
+        event_tx: mpsc::UnboundedSender<NvimEvent>,
+        cwd: Option<PathBuf>,
+        targets: Vec<PathBuf>,
+        clean: bool,
+    ) -> Result<Arc<Self>> {
         let nvim_bin = find_nvim_binary();
         let mut cmd = Command::new(&nvim_bin);
-        cmd.arg("--embed")
-            .arg("--cmd")
+        cmd.arg("--embed");
+        if clean {
+            cmd.arg("--clean");
+        }
+        cmd.arg("--cmd")
             .arg("let g:zenvi = v:true | let g:gui_running = 1 | set ttimeout ttimeoutlen=10");
 
         for target in &targets {
@@ -120,11 +132,13 @@ impl NvimSession {
         cmd.env("PATH", new_path);
 
         if let Some(ref dir) = cwd {
-            cmd.current_dir(dir);
-        } else if let Ok(home) = std::env::var("HOME") {
-            let state_dir = PathBuf::from(&home).join(".local").join("state").join("zenvi");
-            let _ = std::fs::create_dir_all(&state_dir);
-            cmd.current_dir(state_dir);
+            if dir.exists() {
+                cmd.current_dir(dir);
+            } else if let Some(safe_dir) = crate::window::get_safe_default_dir() {
+                cmd.current_dir(safe_dir);
+            }
+        } else if let Some(safe_dir) = crate::window::get_safe_default_dir() {
+            cmd.current_dir(safe_dir);
         }
 
         let mut child = cmd.spawn()?;
@@ -400,33 +414,38 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    fn spawn_test_session(tx: mpsc::UnboundedSender<NvimEvent>) -> Result<Arc<NvimSession>> {
+        NvimSession::spawn_with_options(tx, None, Vec::new(), true)
+    }
+
     #[test]
     fn test_nvim_insert_escape() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            let (tx, mut rx) = mpsc::unbounded_channel();
-            let session = NvimSession::spawn(tx, None, Vec::new()).expect("Failed to spawn nvim");
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let session = spawn_test_session(tx).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
-            // Wait for initial redraws
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            while let Ok(_) = rx.try_recv() {}
+            // Wait for initial normal mode
+            let start = std::time::Instant::now();
+            while start.elapsed() < Duration::from_millis(1500) {
+                if session.state.read().current_mode == "normal" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
 
             session.send_command("inoremap <esc> <cmd>noh<cr><esc>");
             tokio::time::sleep(Duration::from_millis(50)).await;
 
-            // Enter insert mode
+            // Enter insert mode and wait for mode update
             session.send_input("i");
             let start = std::time::Instant::now();
-            while start.elapsed() < Duration::from_millis(1000) {
-                if let Ok(event) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
-                    if event == Some(NvimEvent::Redraw) {
-                        let s = session.state.read();
-                        if s.current_mode == "insert" {
-                            break;
-                        }
-                    }
+            while start.elapsed() < Duration::from_millis(1500) {
+                if session.state.read().current_mode == "insert" {
+                    break;
                 }
+                tokio::time::sleep(Duration::from_millis(20)).await;
             }
 
             {
@@ -435,18 +454,14 @@ mod tests {
                 assert_eq!(s.current_mode, "insert");
             }
 
-            // Send <Esc>
+            // Send <Esc> and wait for mode update
             session.send_input("<Esc>");
             let start = std::time::Instant::now();
-            while start.elapsed() < Duration::from_millis(1000) {
-                if let Ok(event) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
-                    if event == Some(NvimEvent::Redraw) {
-                        let s = session.state.read();
-                        if s.current_mode == "normal" {
-                            break;
-                        }
-                    }
+            while start.elapsed() < Duration::from_millis(1500) {
+                if session.state.read().current_mode == "normal" {
+                    break;
                 }
+                tokio::time::sleep(Duration::from_millis(20)).await;
             }
 
             {
@@ -464,11 +479,11 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, mut rx) = mpsc::unbounded_channel();
-            let session = NvimSession::spawn(tx, None, Vec::new()).expect("Failed to spawn initial nvim");
+            let session = spawn_test_session(tx).expect("Failed to spawn initial nvim");
             session.attach_ui(80, 24);
 
             // Wait for initial redraws
-            while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
+            while let Ok(event) = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
                 if event == Some(NvimEvent::Redraw) {
                     break;
                 }
@@ -485,11 +500,11 @@ mod tests {
 
             // Spawn new session
             let (tx2, mut rx2) = mpsc::unbounded_channel();
-            let new_session = NvimSession::spawn(tx2, None, Vec::new()).expect("Failed to spawn reloaded nvim");
+            let new_session = spawn_test_session(tx2).expect("Failed to spawn reloaded nvim");
             new_session.attach_ui(80, 24);
 
             let mut received_redraw = false;
-            while let Ok(event) = tokio::time::timeout(Duration::from_millis(300), rx2.recv()).await {
+            while let Ok(event) = tokio::time::timeout(Duration::from_millis(500), rx2.recv()).await {
                 if event == Some(NvimEvent::Redraw) {
                     received_redraw = true;
                     break;
@@ -505,7 +520,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, _rx) = mpsc::unbounded_channel();
-            let session = NvimSession::spawn(tx, None, Vec::new()).expect("Failed to spawn nvim");
+            let session = spawn_test_session(tx).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
             let res = session
@@ -544,7 +559,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, _rx) = mpsc::unbounded_channel();
-            let session = NvimSession::spawn(tx, None, Vec::new()).expect("Failed to spawn nvim");
+            let session = spawn_test_session(tx).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
             let check_lua = r#"
@@ -612,24 +627,48 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, _rx) = mpsc::unbounded_channel();
-            let session = NvimSession::spawn(tx, None, Vec::new()).expect("Failed to spawn nvim");
+            let session = spawn_test_session(tx).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
-            // Wait for nvim to initialize
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // Wait for initial normal mode
+            let start = std::time::Instant::now();
+            while start.elapsed() < Duration::from_millis(1500) {
+                if session.state.read().current_mode == "normal" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
 
-            // Enter insert mode and paste text into buffer
+            // Enter insert mode and wait for mode update
             session.send_input("i");
-            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            let start = std::time::Instant::now();
+            while start.elapsed() < Duration::from_millis(1500) {
+                if session.state.read().current_mode == "insert" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
 
             session.paste("Hello from Zenvi Clipboard!");
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            let res = session
-                .exec_lua("return vim.api.nvim_get_current_line()", vec![])
-                .await
-                .expect("Failed to get line");
-            assert_eq!(res.as_str(), Some("Hello from Zenvi Clipboard!"));
+            // Poll until line content updates
+            let start = std::time::Instant::now();
+            let mut line = String::new();
+            while start.elapsed() < std::time::Duration::from_millis(1500) {
+                if let Ok(res) = session
+                    .exec_lua("return vim.api.nvim_get_current_line()", vec![])
+                    .await
+                {
+                    if let Some(s) = res.as_str() {
+                        if s == "Hello from Zenvi Clipboard!" {
+                            line = s.to_string();
+                            break;
+                        }
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            }
+            assert_eq!(line, "Hello from Zenvi Clipboard!");
 
             session.kill();
         });
@@ -640,11 +679,18 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, _rx) = mpsc::unbounded_channel();
-            let config_dir = crate::window::get_nvim_config_dir();
-            let init_lua = config_dir.join("init.lua");
+            let test_dir = std::env::temp_dir().join(format!("zenvi_test_spawn_{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&test_dir);
+            let test_lua = test_dir.join("init.lua");
+            let _ = std::fs::write(&test_lua, "-- test spawn with targets\n");
 
-            let session = NvimSession::spawn(tx, Some(config_dir.clone()), vec![init_lua.clone()])
-                .expect("Failed to spawn nvim");
+            let session = NvimSession::spawn_with_options(
+                tx,
+                Some(test_dir.clone()),
+                vec![test_lua.clone()],
+                true,
+            )
+            .expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -671,6 +717,8 @@ mod tests {
             }
 
             session.kill();
+            let _ = std::fs::remove_file(&test_lua);
+            let _ = std::fs::remove_dir(&test_dir);
         });
     }
 }
