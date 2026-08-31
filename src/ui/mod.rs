@@ -68,7 +68,7 @@ impl ZenviView {
         let focus_handle = cx.focus_handle();
 
         let (event_tx, event_rx) = mpsc::unbounded_channel::<NvimEvent>();
-        let session = match NvimSession::spawn(event_tx, cwd.clone()) {
+        let session = match NvimSession::spawn(event_tx, cwd.clone(), targets.clone()) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Failed to spawn Neovim process: {:?}", e);
@@ -107,16 +107,6 @@ impl ZenviView {
 
         if let Some(ref dir) = cwd {
             session.send_command(&format!("cd {}", dir.display()));
-        }
-
-        // Open targets passed via CLI (files or folders)
-        for target in &targets {
-            if target.is_dir() {
-                session.send_command(&format!("cd {}", target.display()));
-                session.send_command(&format!("edit {}", target.display()));
-            } else {
-                session.send_command(&format!("edit {}", target.display()));
-            }
         }
 
         let event_task = Self::spawn_event_listener(event_rx, window_handle, cx);

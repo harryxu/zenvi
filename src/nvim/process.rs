@@ -84,13 +84,19 @@ impl NvimSession {
     pub fn spawn(
         event_tx: mpsc::UnboundedSender<NvimEvent>,
         cwd: Option<PathBuf>,
+        targets: Vec<PathBuf>,
     ) -> Result<Arc<Self>> {
         let nvim_bin = find_nvim_binary();
         let mut cmd = Command::new(&nvim_bin);
         cmd.arg("--embed")
             .arg("--cmd")
-            .arg("let g:zenvi = v:true | let g:gui_running = 1 | set ttimeout ttimeoutlen=10")
-            .stdin(Stdio::piped())
+            .arg("let g:zenvi = v:true | let g:gui_running = 1 | set ttimeout ttimeoutlen=10");
+
+        for target in &targets {
+            cmd.arg(target);
+        }
+
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
 
@@ -399,7 +405,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, mut rx) = mpsc::unbounded_channel();
-            let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
+            let session = NvimSession::spawn(tx, None, Vec::new()).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
             // Wait for initial redraws
@@ -458,7 +464,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, mut rx) = mpsc::unbounded_channel();
-            let session = NvimSession::spawn(tx, None).expect("Failed to spawn initial nvim");
+            let session = NvimSession::spawn(tx, None, Vec::new()).expect("Failed to spawn initial nvim");
             session.attach_ui(80, 24);
 
             // Wait for initial redraws
@@ -479,7 +485,7 @@ mod tests {
 
             // Spawn new session
             let (tx2, mut rx2) = mpsc::unbounded_channel();
-            let new_session = NvimSession::spawn(tx2, None).expect("Failed to spawn reloaded nvim");
+            let new_session = NvimSession::spawn(tx2, None, Vec::new()).expect("Failed to spawn reloaded nvim");
             new_session.attach_ui(80, 24);
 
             let mut received_redraw = false;
@@ -499,7 +505,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, _rx) = mpsc::unbounded_channel();
-            let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
+            let session = NvimSession::spawn(tx, None, Vec::new()).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
             let res = session
@@ -538,7 +544,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, _rx) = mpsc::unbounded_channel();
-            let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
+            let session = NvimSession::spawn(tx, None, Vec::new()).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
             let check_lua = r#"
@@ -606,7 +612,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, _rx) = mpsc::unbounded_channel();
-            let session = NvimSession::spawn(tx, None).expect("Failed to spawn nvim");
+            let session = NvimSession::spawn(tx, None, Vec::new()).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
             // Wait for nvim to initialize
@@ -624,6 +630,45 @@ mod tests {
                 .await
                 .expect("Failed to get line");
             assert_eq!(res.as_str(), Some("Hello from Zenvi Clipboard!"));
+
+            session.kill();
+        });
+    }
+
+    #[test]
+    fn test_spawn_with_targets() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let config_dir = crate::window::get_nvim_config_dir();
+            let init_lua = config_dir.join("init.lua");
+
+            let session = NvimSession::spawn(tx, Some(config_dir.clone()), vec![init_lua.clone()])
+                .expect("Failed to spawn nvim");
+            session.attach_ui(80, 24);
+
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+            let res = session
+                .exec_lua(
+                    r#"
+                return {
+                    buf = vim.api.nvim_get_current_buf(),
+                    name = vim.api.nvim_buf_get_name(0),
+                    ft = vim.bo.filetype,
+                }
+            "#,
+                    vec![],
+                )
+                .await
+                .expect("Failed to query buffer info");
+
+            let map = res.as_map().expect("Expected map");
+            for (k, v) in map {
+                if k.as_str() == Some("ft") {
+                    assert_eq!(v.as_str(), Some("lua"));
+                }
+            }
 
             session.kill();
         });

@@ -97,7 +97,7 @@ impl ZenviView {
 
                 // 3. Spawn new session in background
                 let (event_tx, event_rx) = mpsc::unbounded_channel::<NvimEvent>();
-                match NvimSession::spawn(event_tx, current_cwd.clone()) {
+                match NvimSession::spawn(event_tx, current_cwd.clone(), Vec::new()) {
                     Ok(new_session) => {
                         new_session.attach_ui(last_cols, last_rows);
                         new_session.send_command("set mouse=a");
