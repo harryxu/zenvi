@@ -13,6 +13,14 @@ pub fn render_grid(
     let default_fg = state.default_fg;
     let default_bg = state.default_bg;
 
+    let default_style = TextStyle {
+        font_family: font_family.to_string().into(),
+        font_size: font_size.into(),
+        line_height: line_height.into(),
+        color: rgb(default_fg).into(),
+        ..Default::default()
+    };
+
     let mut row_elements = Vec::with_capacity(grid.height);
 
     for row in grid.cells.iter() {
@@ -115,7 +123,10 @@ pub fn render_grid(
             div()
                 .h(line_height)
                 .w_full()
-                .child(StyledText::new(line_text).with_highlights(highlights)),
+                .font_family(font_family.to_string())
+                .text_size(font_size)
+                .line_height(line_height)
+                .child(StyledText::new(line_text).with_default_highlights(&default_style, highlights)),
         );
     }
 

@@ -11,7 +11,7 @@ use crate::{
     CloseBuffer, Copy, Cut, Escape, InstallCli, OpenFile, OpenFolder, Paste, Redo, ReloadNvim,
     SelectAll, Undo,
 };
-use font::default_font_family;
+use font::resolve_default_font_family;
 use gpui::*;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -75,17 +75,33 @@ impl ZenviView {
             }
         };
 
+        let font_family = resolve_default_font_family(cx);
+        let font_size = px(14.0);
+        let line_height = px((14.0_f32 * 1.2_f32).round());
+
+        let font_id = cx.text_system().resolve_font(&font(&font_family));
+        let char_width: f32 = cx
+            .text_system()
+            .advance(font_id, font_size, '0')
+            .or_else(|_| cx.text_system().advance(font_id, font_size, 'm'))
+            .map(|s| s.width.into())
+            .unwrap_or(14.0 * 0.6015);
+
         // Initial attach with 100x35
         session.attach_ui(100, 35);
         session.send_command("set mouse=a");
-        session.send_command(r#"lua (function()
-            if vim.o.guifont and vim.o.guifont ~= "" then
-                vim.o.guifont = vim.o.guifont
-            end
-            if vim.o.linespace and vim.o.linespace ~= 0 then
-                vim.o.linespace = vim.o.linespace
-            end
-        end)()"#);
+        session.send_command(&format!(
+            r#"lua (function()
+                if not vim.o.guifont or vim.o.guifont == "" then
+                    vim.o.guifont = "{font_family}:h14"
+                else
+                    vim.o.guifont = vim.o.guifont
+                end
+                if vim.o.linespace and vim.o.linespace ~= 0 then
+                    vim.o.linespace = vim.o.linespace
+                end
+            end)()"#
+        ));
 
         if let Some(ref dir) = cwd {
             session.send_command(&format!("cd {}", dir.display()));
@@ -100,18 +116,6 @@ impl ZenviView {
                 session.send_command(&format!("edit {}", target.display()));
             }
         }
-
-        let font_family = default_font_family().to_string();
-        let font_size = px(14.0);
-        let line_height = px((14.0_f32 * 1.2_f32).round());
-
-        let font_id = cx.text_system().resolve_font(&font(&font_family));
-        let char_width: f32 = cx
-            .text_system()
-            .advance(font_id, font_size, '0')
-            .or_else(|_| cx.text_system().advance(font_id, font_size, 'm'))
-            .map(|s| s.width.into())
-            .unwrap_or(14.0 * 0.6015);
 
         let event_task = Self::spawn_event_listener(event_rx, window_handle, cx);
 
