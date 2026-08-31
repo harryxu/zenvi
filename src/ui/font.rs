@@ -258,7 +258,7 @@ impl ZenviView {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::parse_guifont;
 
     #[test]
     fn test_parse_guifont_full() {
