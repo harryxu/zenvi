@@ -3,7 +3,6 @@ use gpui::*;
 /// Pre-computed titlebar and menu colors derived from the Neovim theme.
 pub struct TitlebarStyle {
     pub title_color: Rgba,
-    pub badge_color: Rgba,
     pub border_color: Rgba,
     #[cfg(not(target_os = "macos"))]
     pub menu_hover_bg: Rgba,
@@ -29,20 +28,6 @@ pub fn derive_titlebar_style(default_bg: u32, default_fg: u32) -> TitlebarStyle 
     let is_dark = luminance < 128.0;
 
     let title_color = rgb(default_fg);
-
-    let badge_color = if is_dark {
-        rgb(pack_rgb(
-            (bg_r + 80.0).min(200.0),
-            (bg_g + 80.0).min(200.0),
-            (bg_b + 80.0).min(200.0),
-        ))
-    } else {
-        rgb(pack_rgb(
-            (bg_r - 80.0).max(60.0),
-            (bg_g - 80.0).max(60.0),
-            (bg_b - 80.0).max(60.0),
-        ))
-    };
 
     let border_color = if is_dark {
         rgb(pack_rgb(
@@ -105,7 +90,6 @@ pub fn derive_titlebar_style(default_bg: u32, default_fg: u32) -> TitlebarStyle 
 
     TitlebarStyle {
         title_color,
-        badge_color,
         border_color,
         #[cfg(not(target_os = "macos"))]
         menu_hover_bg,
