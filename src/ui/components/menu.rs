@@ -41,16 +41,93 @@ impl MenuItem {
     }
 }
 
-const MENU_WIDTH: f32 = 220.0;
+/// Specifies the anchor position for the root menu panel
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MenuAnchor {
+    TopLeft { left: Pixels, top: Pixels },
+    TopRight { right: Pixels, top: Pixels },
+}
+
+/// Specifies the direction in which submenus should fly out
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SubmenuDirection {
+    Right,
+    Left,
+}
+
+/// Configuration options for the cascading menu component
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub struct MenuOptions {
+    pub anchor: MenuAnchor,
+    pub submenu_direction: SubmenuDirection,
+    pub width: Pixels,
+    pub gap: Pixels,
+}
+
+const DEFAULT_MENU_WIDTH: f32 = 220.0;
+const DEFAULT_MENU_GAP: f32 = 2.0;
 const ITEM_HEIGHT: f32 = 26.0;
 const SEPARATOR_HEIGHT: f32 = 9.0;
 const MENU_PADDING_Y: f32 = 4.0;
 
+impl Default for MenuOptions {
+    fn default() -> Self {
+        Self {
+            anchor: MenuAnchor::TopLeft {
+                left: px(8.0),
+                top: px(TITLEBAR_HEIGHT),
+            },
+            submenu_direction: SubmenuDirection::Right,
+            width: px(DEFAULT_MENU_WIDTH),
+            gap: px(DEFAULT_MENU_GAP),
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl MenuOptions {
+    /// Creates options for a menu anchored to the top-left, expanding submenus to the right
+    pub fn top_left(left: Pixels, top: Pixels) -> Self {
+        Self {
+            anchor: MenuAnchor::TopLeft { left, top },
+            submenu_direction: SubmenuDirection::Right,
+            ..Default::default()
+        }
+    }
+
+    /// Creates options for a menu anchored to the top-right, expanding submenus to the left
+    pub fn top_right(right: Pixels, top: Pixels) -> Self {
+        Self {
+            anchor: MenuAnchor::TopRight { right, top },
+            submenu_direction: SubmenuDirection::Left,
+            ..Default::default()
+        }
+    }
+
+    pub fn with_width(mut self, width: Pixels) -> Self {
+        self.width = width;
+        self
+    }
+
+    pub fn with_submenu_direction(mut self, direction: SubmenuDirection) -> Self {
+        self.submenu_direction = direction;
+        self
+    }
+
+    pub fn with_gap(mut self, gap: Pixels) -> Self {
+        self.gap = gap;
+        self
+    }
+}
+
 /// Renders a flat submenu panel
-fn render_flat_panel(
+pub fn render_flat_panel(
     items: &[MenuItem],
-    right_offset: Pixels,
-    top_offset: Pixels,
+    anchor: MenuAnchor,
+    width: Pixels,
     style: &TitlebarStyle,
     cx: &mut Context<ZenviView>,
 ) -> impl IntoElement {
@@ -120,11 +197,9 @@ fn render_flat_panel(
         }
     }
 
-    div()
+    let panel = div()
         .absolute()
-        .top(top_offset)
-        .right(right_offset)
-        .w(px(MENU_WIDTH))
+        .w(width)
         .bg(style_dropdown_bg)
         .border_1()
         .border_color(style_border)
@@ -135,13 +210,18 @@ fn render_flat_panel(
             MouseButton::Left,
             cx.listener(|_, _, _, cx| cx.stop_propagation()),
         )
-        .children(item_elements)
+        .children(item_elements);
+
+    match anchor {
+        MenuAnchor::TopLeft { left, top } => panel.top(top).left(left),
+        MenuAnchor::TopRight { right, top } => panel.top(top).right(right),
+    }
 }
 
-/// Renders the root application menu with cascading submenus
+/// Renders the root application menu with cascading submenus based on configurable MenuOptions
 pub fn render_cascading_menu(
     items: Vec<MenuItem>,
-    right_offset: Pixels,
+    options: MenuOptions,
     style: &TitlebarStyle,
     active_submenu: Option<usize>,
     cx: &mut Context<ZenviView>,
@@ -152,6 +232,10 @@ pub fn render_cascading_menu(
     let style_title_color = style.title_color;
     let style_badge_color = style.badge_color;
 
+    let top_base = match options.anchor {
+        MenuAnchor::TopLeft { top, .. } | MenuAnchor::TopRight { top, .. } => top,
+    };
+
     // Track active submenu and its top vertical position
     let mut submenu_to_render: Option<(Vec<MenuItem>, Pixels)> = None;
     let mut current_top = MENU_PADDING_Y;
@@ -159,7 +243,7 @@ pub fn render_cascading_menu(
     for (idx, item) in items.iter().enumerate() {
         if let MenuItem::Submenu { items: sub_items, .. } = item {
             if active_submenu == Some(idx) {
-                submenu_to_render = Some((sub_items.clone(), px(TITLEBAR_HEIGHT + current_top)));
+                submenu_to_render = Some((sub_items.clone(), top_base + px(current_top)));
             }
         }
         match item {
@@ -232,6 +316,11 @@ pub fn render_cascading_menu(
             }
             MenuItem::Submenu { label, .. } => {
                 let is_active = active_submenu == Some(idx);
+                let arrow_symbol = match options.submenu_direction {
+                    SubmenuDirection::Right => "›",
+                    SubmenuDirection::Left => "‹",
+                };
+
                 main_item_elements.push(
                     div()
                         .h(px(ITEM_HEIGHT))
@@ -261,7 +350,7 @@ pub fn render_cascading_menu(
                             div()
                                 .text_size(px(12.0))
                                 .text_color(style_badge_color)
-                                .child("›"),
+                                .child(arrow_symbol),
                         )
                         .into_any_element(),
                 );
@@ -269,11 +358,9 @@ pub fn render_cascading_menu(
         }
     }
 
-    let main_panel = div()
+    let main_panel_div = div()
         .absolute()
-        .top(px(TITLEBAR_HEIGHT))
-        .right(right_offset)
-        .w(px(MENU_WIDTH))
+        .w(options.width)
         .bg(style_dropdown_bg)
         .border_1()
         .border_color(style_border)
@@ -286,14 +373,37 @@ pub fn render_cascading_menu(
         )
         .children(main_item_elements);
 
+    let main_panel = match options.anchor {
+        MenuAnchor::TopLeft { left, top } => main_panel_div.top(top).left(left),
+        MenuAnchor::TopRight { right, top } => main_panel_div.top(top).right(right),
+    };
+
+    // Calculate submenu anchor position based on options
     let submenu_panel = submenu_to_render.map(|(sub_items, top_pos)| {
-        render_flat_panel(
-            &sub_items,
-            right_offset + px(MENU_WIDTH + 2.0),
-            top_pos,
-            style,
-            cx,
-        )
+        let submenu_anchor = match options.anchor {
+            MenuAnchor::TopLeft { left, .. } => match options.submenu_direction {
+                SubmenuDirection::Right => MenuAnchor::TopLeft {
+                    left: left + options.width + options.gap,
+                    top: top_pos,
+                },
+                SubmenuDirection::Left => MenuAnchor::TopLeft {
+                    left: (left - options.width - options.gap).max(px(0.0)),
+                    top: top_pos,
+                },
+            },
+            MenuAnchor::TopRight { right, .. } => match options.submenu_direction {
+                SubmenuDirection::Left => MenuAnchor::TopRight {
+                    right: right + options.width + options.gap,
+                    top: top_pos,
+                },
+                SubmenuDirection::Right => MenuAnchor::TopRight {
+                    right: (right - options.width - options.gap).max(px(0.0)),
+                    top: top_pos,
+                },
+            },
+        };
+
+        render_flat_panel(&sub_items, submenu_anchor, options.width, style, cx)
     });
 
     div()

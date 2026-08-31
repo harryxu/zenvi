@@ -79,19 +79,6 @@ pub fn render_titlebar(
         .gap(px(8.0))
         .child(
             div()
-                .text_size(px(12.0))
-                .font_weight(FontWeight::BOLD)
-                .text_color(style.title_color)
-                .child(title.to_string()),
-        );
-
-    let right_side = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .child(
-            div()
                 .id("menu-btn-toggle")
                 .px(px(6.0))
                 .py(px(2.0))
@@ -111,6 +98,13 @@ pub fn render_titlebar(
                     }),
                 )
                 .child("☰"),
+        )
+        .child(
+            div()
+                .text_size(px(12.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(style.title_color)
+                .child(title.to_string()),
         );
 
     div()
@@ -122,7 +116,7 @@ pub fn render_titlebar(
         .flex_row()
         .items_center()
         .justify_between()
-        .pl(px(12.0))
+        .pl(px(8.0))
         .pr(px(12.0))
         .bg(rgb(default_bg))
         .border_b_1()
@@ -137,5 +131,4 @@ pub fn render_titlebar(
             }),
         )
         .child(left_side)
-        .child(right_side)
 }

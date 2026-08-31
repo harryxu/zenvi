@@ -4,7 +4,7 @@ use gpui::{App, Menu, MenuItem as GpuiMenuItem};
 #[cfg(not(target_os = "macos"))]
 use crate::nvim::state::NvimState;
 #[cfg(not(target_os = "macos"))]
-use crate::ui::components::menu::{render_cascading_menu, MenuItem};
+use crate::ui::components::menu::{render_cascading_menu, MenuItem, MenuOptions};
 #[cfg(not(target_os = "macos"))]
 use crate::ui::components::style::derive_titlebar_style;
 #[cfg(not(target_os = "macos"))]
@@ -175,5 +175,6 @@ pub fn render_app_menu(
     cx: &mut Context<ZenviView>,
 ) -> impl IntoElement {
     let style = derive_titlebar_style(state.default_bg, state.default_fg);
-    render_cascading_menu(build_main_menu(), px(12.0), &style, active_submenu, cx)
+    let options = MenuOptions::top_left(px(8.0), px(crate::ui::TITLEBAR_HEIGHT));
+    render_cascading_menu(build_main_menu(), options, &style, active_submenu, cx)
 }
