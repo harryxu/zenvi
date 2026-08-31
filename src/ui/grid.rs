@@ -16,10 +16,31 @@ pub fn render_grid(
     let mut row_elements = Vec::with_capacity(grid.height);
 
     for row in grid.cells.iter() {
-        let mut line_text = String::with_capacity(grid.width);
+        // Find the rightmost cell that has content or non-default styling
+        let last_content_col = row.iter().rposition(|cell| {
+            if cell.text != " " && !cell.text.is_empty() {
+                return true;
+            }
+            if let Some(attr) = state.highlights.get(&cell.hl_id) {
+                let bg = attr.background.unwrap_or(default_bg);
+                if bg != default_bg || attr.reverse || attr.underline || attr.undercurl {
+                    return true;
+                }
+            }
+            false
+        });
+
+        let Some(last_col) = last_content_col else {
+            // Entire line is empty with default background: zero text shaping required
+            row_elements.push(div().h(line_height).w_full());
+            continue;
+        };
+
+        let visible_cells = &row[..=last_col];
+        let mut line_text = String::with_capacity(visible_cells.len());
         let mut highlights: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
 
-        for cell in row.iter() {
+        for cell in visible_cells {
             // In Neovim ext_linegrid, a double-width character occupies 2 cells:
             // the first cell contains the character, and the second cell has width == 0 and text == "".
             // Skip the second trailing cell so we don't insert an extra space.
@@ -35,20 +56,20 @@ pub fn render_grid(
             }
             let end_byte = line_text.len();
 
-            let attr = state
-                .highlights
-                .get(&cell.hl_id)
-                .cloned()
-                .unwrap_or_default();
+            let attr = state.highlights.get(&cell.hl_id);
 
-            let mut fg = attr.foreground.unwrap_or(default_fg);
-            let mut bg = attr.background.unwrap_or(default_bg);
+            let mut fg = attr.and_then(|a| a.foreground).unwrap_or(default_fg);
+            let mut bg = attr.and_then(|a| a.background).unwrap_or(default_bg);
+            let reverse = attr.map(|a| a.reverse).unwrap_or(false);
+            let underline = attr.map(|a| a.underline).unwrap_or(false);
+            let bold = attr.map(|a| a.bold).unwrap_or(false);
+            let italic = attr.map(|a| a.italic).unwrap_or(false);
 
-            if attr.reverse {
+            if reverse {
                 std::mem::swap(&mut fg, &mut bg);
             }
 
-            let underline = if attr.underline {
+            let underline_style = if underline {
                 Some(UnderlineStyle {
                     color: Some(rgb(fg).into()),
                     thickness: px(1.0),
@@ -65,17 +86,17 @@ pub fn render_grid(
                 } else {
                     None
                 },
-                font_weight: if attr.bold {
+                font_weight: if bold {
                     Some(FontWeight::BOLD)
                 } else {
                     None
                 },
-                font_style: if attr.italic {
+                font_style: if italic {
                     Some(FontStyle::Italic)
                 } else {
                     None
                 },
-                underline,
+                underline: underline_style,
                 ..Default::default()
             };
 

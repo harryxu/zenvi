@@ -32,23 +32,21 @@ pub fn init_keymaps(cx: &mut App) {
 
     #[cfg(not(target_os = "macos"))]
     cx.bind_keys([
-        KeyBinding::new("ctrl-q", Quit, None),
-        KeyBinding::new("ctrl-w", CloseBuffer, None),
-        KeyBinding::new("ctrl-W", CloseBuffer, None),
+        KeyBinding::new("ctrl-shift-q", Quit, None),
+        KeyBinding::new("alt-f4", Quit, None),
+        KeyBinding::new("ctrl-shift-w", CloseBuffer, None),
+        KeyBinding::new("ctrl-shift-W", CloseBuffer, None),
         KeyBinding::new("ctrl-shift-n", NewWindow, None),
         KeyBinding::new("ctrl-shift-N", NewWindow, None),
-        KeyBinding::new("ctrl-,", OpenConfig, None),
+        KeyBinding::new("ctrl-shift-,", OpenConfig, None),
         KeyBinding::new("ctrl-shift-r", ReloadNvim, None),
         KeyBinding::new("ctrl-shift-R", ReloadNvim, None),
-        KeyBinding::new("ctrl-o", OpenFile, None),
+        KeyBinding::new("ctrl-shift-o", OpenFile, None),
         KeyBinding::new("ctrl-alt-o", OpenFolder, None),
-        KeyBinding::new("ctrl-shift-o", OpenFolder, None),
         KeyBinding::new("ctrl-shift-v", Paste, None),
         KeyBinding::new("ctrl-shift-c", Copy, None),
         KeyBinding::new("ctrl-shift-x", Cut, None),
         KeyBinding::new("ctrl-shift-a", SelectAll, None),
         KeyBinding::new("ctrl-shift-z", Redo, None),
-        KeyBinding::new("escape", Escape, None),
-        KeyBinding::new("ctrl-[", Escape, None),
     ]);
 }

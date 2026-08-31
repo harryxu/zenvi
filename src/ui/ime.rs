@@ -59,12 +59,21 @@ impl EntityInputHandler for ZenviView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) {
+        let had_marked = self.marked_text.is_some();
         self.marked_text = None;
         if !new_text.is_empty() {
-            if new_text == "<" {
-                self.session.send_input("<lt>");
-            } else {
-                self.session.send_input(new_text);
+            let is_non_ascii = !new_text.is_ascii();
+            let is_multi_char = new_text.chars().count() > 1;
+
+            // Only send text from IME if it was composing (marked_text was present)
+            // or if it contains non-ASCII characters (e.g. Chinese characters from direct IME commit) or multi-char strings.
+            // Normal ASCII keystrokes are handled directly by `on_key_down` to prevent double-typing across all platforms.
+            if had_marked || is_non_ascii || is_multi_char {
+                if new_text == "<" {
+                    self.session.send_input("<lt>");
+                } else {
+                    self.session.send_input(new_text);
+                }
             }
         }
     }

@@ -90,9 +90,12 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
         return Some(format!("<{}{}>", prefix, raw_key));
     }
 
-    // Plain characters without modifiers are routed through EntityInputHandler (replace_text_in_range)
-    // so that IME (Chinese, Japanese, etc.) composition and candidate selection work seamlessly.
-    None
+    // Plain characters without modifiers (e.g. 'a', 'A', '1', ':', '/', '<', etc.)
+    if raw_key == "<" {
+        Some("<lt>".to_string())
+    } else {
+        Some(raw_key.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -164,10 +167,12 @@ mod tests {
     }
 
     #[test]
-    fn test_plain_characters_route_to_input_handler() {
-        assert_eq!(key_event_to_nvim(&make_event("a", false, false, false, false)), None);
-        assert_eq!(key_event_to_nvim(&make_event("c", false, false, false, false)), None);
-        assert_eq!(key_event_to_nvim(&make_event("e", false, false, false, false)), None);
-        assert_eq!(key_event_to_nvim(&make_event("1", false, false, false, false)), None);
+    fn test_plain_characters_route_to_nvim() {
+        assert_eq!(key_event_to_nvim(&make_event("a", false, false, false, false)), Some("a".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("c", false, false, false, false)), Some("c".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("e", false, false, false, false)), Some("e".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("1", false, false, false, false)), Some("1".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event(":", false, false, false, false)), Some(":".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("<", false, false, false, false)), Some("<lt>".to_string()));
     }
 }

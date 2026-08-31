@@ -142,7 +142,14 @@ impl NvimSession {
         let write_task = tokio::spawn(async move {
             while let Some(val) = rx.recv().await {
                 let mut buf = Vec::new();
-                if let Ok(_) = rmpv::encode::write_value(&mut buf, &val) {
+                let _ = rmpv::encode::write_value(&mut buf, &val);
+
+                // Drain any additional pending values to batch multiple IPC messages in one write
+                while let Ok(next_val) = rx.try_recv() {
+                    let _ = rmpv::encode::write_value(&mut buf, &next_val);
+                }
+
+                if !buf.is_empty() {
                     let _ = stdin.write_all(&buf).await;
                     let _ = stdin.flush().await;
                 }
@@ -173,6 +180,7 @@ impl NvimSession {
 
                         let mut cursor = std::io::Cursor::new(&buffer);
                         let mut last_pos = 0;
+                        let mut has_redraw = false;
 
                         while let Ok(val) = rmpv::decode::read_value(&mut cursor) {
                             last_pos = cursor.position() as usize;
@@ -188,7 +196,7 @@ impl NvimSession {
                                                     }
                                                 }
                                             }
-                                            let _ = event_tx_clone.send(NvimEvent::Redraw);
+                                            has_redraw = true;
                                         }
                                     }
                                     RpcMessage::Response {
@@ -208,6 +216,10 @@ impl NvimSession {
                                     RpcMessage::Request { .. } => {}
                                 }
                             }
+                        }
+
+                        if has_redraw {
+                            let _ = event_tx_clone.send(NvimEvent::Redraw);
                         }
 
                         if last_pos > 0 {

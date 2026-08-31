@@ -142,20 +142,39 @@ impl ZenviView {
             let mut cx = cx.clone();
             async move {
                 while let Some(event) = event_rx.recv().await {
+                    let mut needs_redraw = false;
+                    let mut should_exit = false;
+
                     match event {
-                        NvimEvent::Redraw => {
-                            let _ = this.update(&mut cx, |_this, cx| {
-                                cx.notify();
-                            });
+                        NvimEvent::Redraw => needs_redraw = true,
+                        NvimEvent::Exit => should_exit = true,
+                    }
+
+                    // Coalesce burst redraw notifications into a single render pass
+                    while let Ok(next_event) = event_rx.try_recv() {
+                        match next_event {
+                            NvimEvent::Redraw => needs_redraw = true,
+                            NvimEvent::Exit => should_exit = true,
                         }
-                        NvimEvent::Exit => {
-                            let _ = window_handle.update(&mut cx, |_, window, cx| {
-                                window.remove_window();
-                                if cx.windows().len() <= 1 {
-                                    cx.quit();
-                                }
-                            });
-                        }
+                    }
+
+                    if needs_redraw {
+                        let _ = this.update(&mut cx, |_this, cx| {
+                            cx.notify();
+                        });
+                    }
+
+                    if should_exit {
+                        let _ = cx.update(|cx| {
+                            if cx.windows().len() <= 1 {
+                                cx.quit();
+                            } else {
+                                let _ = window_handle.update(cx, |_, window, _cx| {
+                                    window.remove_window();
+                                });
+                            }
+                        });
+                        break;
                     }
                 }
             }
@@ -257,11 +276,12 @@ impl Render for ZenviView {
         let state = self.session.state.read();
         let default_bg = state.default_bg;
 
+        let default_grid = crate::nvim::state::Grid::new(1, 80, 24);
         let grid = state
             .grids
-            .get(&state.active_grid)
-            .cloned()
-            .unwrap_or_else(|| crate::nvim::state::Grid::new(1, 80, 24));
+            .get(&1)
+            .or_else(|| state.grids.get(&state.active_grid))
+            .unwrap_or(&default_grid);
 
         // Calculate grid dimensions and notify Neovim of resize
         let viewport = window.viewport_size();
@@ -282,7 +302,7 @@ impl Render for ZenviView {
 
         let grid_element = grid::render_grid(
             &state,
-            &grid,
+            grid,
             &self.font_family,
             self.font_size,
             self.line_height,
