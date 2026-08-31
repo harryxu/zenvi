@@ -47,7 +47,8 @@ fn main() {
             if !config_dir.exists() {
                 let _ = std::fs::create_dir_all(&config_dir);
             }
-            window::open_zenvi_window(Some(config_dir), Vec::new(), cx);
+            let init_lua = config_dir.join("init.lua");
+            window::open_zenvi_window(Some(config_dir), vec![init_lua], cx);
         });
 
         cx.on_action(|_: &InstallCli, _cx: &mut App| {
