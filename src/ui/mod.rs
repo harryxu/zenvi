@@ -161,6 +161,92 @@ impl ZenviView {
             }
         })
     }
+
+    /// Binds all GPUI action handlers to the root element.
+    fn bind_actions(root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+        root.on_action(cx.listener(|this, _: &ReloadNvim, _window, cx| {
+            this.reload_nvim(cx);
+        }))
+        .on_action(cx.listener(|this, _: &InstallCli, _window, cx| {
+            this.install_cli(cx);
+        }))
+        .on_action(cx.listener(|this, _: &OpenFile, _window, cx| {
+            this.open_file(cx);
+        }))
+        .on_action(cx.listener(|this, _: &OpenFolder, _window, cx| {
+            this.open_folder(cx);
+        }))
+        .on_action(cx.listener(|this, _: &CloseBuffer, _window, cx| {
+            this.close_buffer(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Paste, _window, cx| {
+            this.paste(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Copy, _window, cx| {
+            this.copy(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Cut, _window, cx| {
+            this.cut(cx);
+        }))
+        .on_action(cx.listener(|this, _: &SelectAll, _window, cx| {
+            this.select_all(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Undo, _window, cx| {
+            this.undo(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Redo, _window, cx| {
+            this.redo(cx);
+        }))
+        .on_action(cx.listener(|this, _: &Escape, _window, _cx| {
+            this.session.send_input("<Esc>");
+        }))
+    }
+
+    /// Binds all mouse and scroll event handlers to the root element.
+    fn bind_mouse_handlers(root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+        root.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
+                this.handle_mouse_down("left", event.position, &event.modifiers, window);
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
+                this.handle_mouse_down("right", event.position, &event.modifiers, window);
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Middle,
+            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
+                this.handle_mouse_down("middle", event.position, &event.modifiers, window);
+            }),
+        )
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
+                this.handle_mouse_up("left", event.position, &event.modifiers);
+            }),
+        )
+        .on_mouse_up(
+            MouseButton::Right,
+            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
+                this.handle_mouse_up("right", event.position, &event.modifiers);
+            }),
+        )
+        .on_mouse_up(
+            MouseButton::Middle,
+            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
+                this.handle_mouse_up("middle", event.position, &event.modifiers);
+            }),
+        )
+        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, _cx| {
+            this.handle_mouse_move(event);
+        }))
+        .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
+            this.handle_scroll_wheel(event);
+        }))
+    }
 }
 
 impl Render for ZenviView {
@@ -280,95 +366,6 @@ impl Render for ZenviView {
                 .overflow_hidden()
                 .child(grid_element),
         )
-    }
-}
-
-/// Render helper methods for binding actions and event handlers.
-impl ZenviView {
-    /// Binds all GPUI action handlers to the root element.
-    fn bind_actions(root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
-        root.on_action(cx.listener(|this, _: &ReloadNvim, _window, cx| {
-            this.reload_nvim(cx);
-        }))
-        .on_action(cx.listener(|this, _: &InstallCli, _window, cx| {
-            this.install_cli(cx);
-        }))
-        .on_action(cx.listener(|this, _: &OpenFile, _window, cx| {
-            this.open_file(cx);
-        }))
-        .on_action(cx.listener(|this, _: &OpenFolder, _window, cx| {
-            this.open_folder(cx);
-        }))
-        .on_action(cx.listener(|this, _: &CloseBuffer, _window, cx| {
-            this.close_buffer(cx);
-        }))
-        .on_action(cx.listener(|this, _: &Paste, _window, cx| {
-            this.paste(cx);
-        }))
-        .on_action(cx.listener(|this, _: &Copy, _window, cx| {
-            this.copy(cx);
-        }))
-        .on_action(cx.listener(|this, _: &Cut, _window, cx| {
-            this.cut(cx);
-        }))
-        .on_action(cx.listener(|this, _: &SelectAll, _window, cx| {
-            this.select_all(cx);
-        }))
-        .on_action(cx.listener(|this, _: &Undo, _window, cx| {
-            this.undo(cx);
-        }))
-        .on_action(cx.listener(|this, _: &Redo, _window, cx| {
-            this.redo(cx);
-        }))
-        .on_action(cx.listener(|this, _: &Escape, _window, _cx| {
-            this.session.send_input("<Esc>");
-        }))
-    }
-
-    /// Binds all mouse and scroll event handlers to the root element.
-    fn bind_mouse_handlers(root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
-        root.on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                this.handle_mouse_down("left", event.position, &event.modifiers, window);
-            }),
-        )
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                this.handle_mouse_down("right", event.position, &event.modifiers, window);
-            }),
-        )
-        .on_mouse_down(
-            MouseButton::Middle,
-            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                this.handle_mouse_down("middle", event.position, &event.modifiers, window);
-            }),
-        )
-        .on_mouse_up(
-            MouseButton::Left,
-            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                this.handle_mouse_up("left", event.position, &event.modifiers);
-            }),
-        )
-        .on_mouse_up(
-            MouseButton::Right,
-            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                this.handle_mouse_up("right", event.position, &event.modifiers);
-            }),
-        )
-        .on_mouse_up(
-            MouseButton::Middle,
-            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                this.handle_mouse_up("middle", event.position, &event.modifiers);
-            }),
-        )
-        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, _cx| {
-            this.handle_mouse_move(event);
-        }))
-        .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
-            this.handle_scroll_wheel(event);
-        }))
     }
 }
 
