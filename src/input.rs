@@ -22,6 +22,40 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
     let key_lower = raw_key.to_lowercase();
     let key = key_lower.as_str();
 
+    // Ignore standalone modifier key press/release events
+    match key {
+        "shift"
+        | "shift_l"
+        | "shift_r"
+        | "control"
+        | "ctrl"
+        | "control_l"
+        | "control_r"
+        | "alt"
+        | "alt_l"
+        | "alt_r"
+        | "meta"
+        | "meta_l"
+        | "meta_r"
+        | "super"
+        | "super_l"
+        | "super_r"
+        | "command"
+        | "cmd"
+        | "platform"
+        | "capslock"
+        | "caps_lock"
+        | "numlock"
+        | "num_lock"
+        | "scrolllock"
+        | "scroll_lock"
+        | "fn"
+        | "function"
+        | "iso_level3_shift"
+        | "mode_switch" => return None,
+        _ => {}
+    }
+
     // Map special key names to Neovim equivalents
     let special_name = match key {
         "enter" | "return" | "\r" | "\n" => Some("CR"),
@@ -93,6 +127,8 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
     // Plain characters without modifiers (e.g. 'a', 'A', '1', ':', '/', '<', etc.)
     if raw_key == "<" {
         Some("<lt>".to_string())
+    } else if shift && raw_key.len() == 1 && raw_key.chars().all(|c| c.is_ascii_lowercase()) {
+        Some(raw_key.to_uppercase())
     } else {
         Some(raw_key.to_string())
     }
@@ -118,6 +154,24 @@ mod tests {
             },
             is_held: false,
         }
+    }
+
+    #[test]
+    fn test_modifier_keys_ignored() {
+        assert_eq!(key_event_to_nvim(&make_event("shift", false, false, true, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("Shift", false, false, true, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("control", true, false, false, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("ctrl", true, false, false, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("alt", false, true, false, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("super", false, false, false, true)), None);
+        assert_eq!(key_event_to_nvim(&make_event("capslock", false, false, false, false)), None);
+    }
+
+    #[test]
+    fn test_shift_g_and_uppercase() {
+        assert_eq!(key_event_to_nvim(&make_event("G", false, false, true, false)), Some("G".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("g", false, false, true, false)), Some("G".to_string()));
+        assert_eq!(key_event_to_nvim(&make_event("$", false, false, true, false)), Some("$".to_string()));
     }
 
     #[test]
