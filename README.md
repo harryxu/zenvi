@@ -75,23 +75,3 @@ bash scripts/bundle_macos.sh
 # Open the packaged standalone app
 open target/Zenvi.app
 ```
-
----
-
-## 🏗️ Project Architecture
-
-```
-src/
-├── main.rs          # Application entry point & GPUI window management
-├── input.rs         # GPUI Keystroke -> Neovim key notation converter
-├── nvim/
-│   ├── mod.rs       # Module exports
-│   ├── process.rs   # nvim --embed process lifecycle & stdio RPC channels
-│   ├── protocol.rs  # Msgpack-RPC encoder/decoder
-│   ├── events.rs    # Neovim 'redraw' protocol dispatcher
-│   └── state.rs     # Screen grid buffer, highlights & mode state
-└── ui/
-    ├── mod.rs       # ZenviView root view, status bar & drag-and-drop handler
-    ├── font.rs      # Neovim guifont & linespace parser
-    └── grid.rs      # High-performance grid text & cell span renderer
-```
