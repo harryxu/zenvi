@@ -14,10 +14,9 @@
 
 - **Embedded Neovim** — Runs `nvim --embed` via MessagePack-RPC. Your `init.lua`, plugins, Treesitter, and LSP configs work as-is.
 - **GPU Rendering** — Uses GPUI with Metal (macOS) / Vulkan.
+- **Theme Synchronization** — Titlebar, borders, and menus dynamically derive colors from Neovim's active colorscheme.
 - **CLI Integration** — Install `zenvi` command via menu (`Zenvi -> Install Shell Command`), then open files or directories from terminal (`zenvi .`, `zenvi file.rs`).
 - **Neovim Hot Reload** — Reload Neovim session via `Zenvi -> Reload Neovim` or `Cmd+Shift+R`. Supports [auto-session](https://github.com/rmagatti/auto-session) state save/restore.
-- **Keyboard Mapping** — Supports Neovim key sequences: `<Esc>`, `<CR>`, `<C-w>`, `<M-x>`, `<D-s>`, arrow keys, function keys, etc.
-- **Dynamic Resize** — Recalculates cols/rows on window resize and notifies Neovim to update the grid.
 - **`guifont` Support** — Set font via `vim.opt.guifont` in `init.lua`. Injects `vim.g.zenvi = true` and `vim.g.gui_running = 1` on startup.
 
 ---
