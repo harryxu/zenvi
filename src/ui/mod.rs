@@ -1,9 +1,8 @@
 pub mod commands;
+pub mod components;
 pub mod font;
-pub mod grid;
 pub mod ime;
 pub mod mouse;
-pub mod titlebar;
 
 use crate::input::key_event_to_nvim;
 use crate::nvim::process::{NvimEvent, NvimSession};
@@ -39,7 +38,7 @@ pub struct ZenviView {
     pub cwd: Option<PathBuf>,
     pub marked_text: Option<String>,
     #[cfg(not(target_os = "macos"))]
-    pub active_menu: Option<titlebar::ActiveMenu>,
+    pub active_menu: Option<components::menu::ActiveMenu>,
     pub(crate) _event_task: Option<Task<()>>,
 }
 
@@ -315,7 +314,7 @@ impl Render for ZenviView {
             self.session.try_resize(cols, rows);
         }
 
-        let grid_element = grid::render_grid(
+        let grid_element = components::grid::render_grid(
             &state,
             grid,
             &self.font_family,
@@ -376,9 +375,9 @@ impl Render for ZenviView {
         let root = Self::bind_mouse_handlers(root, cx);
 
         #[cfg(target_os = "macos")]
-        let titlebar_element = titlebar::render_titlebar(&state, cx);
+        let titlebar_element = components::titlebar::render_titlebar(&state, cx);
         #[cfg(not(target_os = "macos"))]
-        let titlebar_element = titlebar::render_titlebar(&state, self.active_menu, cx);
+        let titlebar_element = components::titlebar::render_titlebar(&state, self.active_menu, cx);
 
         let root = root
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
@@ -397,7 +396,7 @@ impl Render for ZenviView {
 
         #[cfg(not(target_os = "macos"))]
         let root = if let Some(active) = self.active_menu {
-            root.child(titlebar::render_menu_dropdown(active, &state, cx))
+            root.child(components::menu::render_menu_dropdown(active, &state, cx))
         } else {
             root
         };

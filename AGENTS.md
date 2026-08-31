@@ -52,10 +52,18 @@
     │   ├── events.rs        # Neovim `redraw` event dispatcher (grid_line, hl_attr_define, cursor_goto, etc.)
     │   └── state.rs         # In-memory screen grid buffers, highlight lookup table, cursor & mode state
     └── ui/
-        ├── mod.rs           # ZenviView (Root view, custom macOS titlebar, status bar, mouse events, drag-and-drop)
+        ├── mod.rs           # ZenviView (Root view, layout composition, mouse & drag-and-drop events)
         ├── font.rs          # Neovim guifont & linespace parser and font metrics calculator
-        └── grid.rs          # High-performance grid text & cell span renderer
-```
+        ├── mouse.rs         # Mouse coordinate mapping and scroll handling
+        ├── ime.rs           # Native IME composition handling
+        ├── commands.rs      # Desktop commands (file picker, folder picker, reload)
+        └── components/      # Dedicated UI rendering components
+            ├── mod.rs       # Component exports
+            ├── grid.rs      # High-performance grid text & cell span renderer
+            ├── titlebar.rs  # Window titlebar container (macOS traffic lights & Linux/Windows menu bar)
+            ├── dropdown.rs  # Generic dropdown menu overlay component
+            ├── menu.rs      # Linux/Windows menu item definitions and dropdown dispatcher
+            └── style.rs     # Theme-derived color palette calculation
 
 ---
 
@@ -71,10 +79,10 @@
   4. GPUI async task receives `NvimEvent::Redraw` and triggers `cx.notify()`.
 * **Exit Lifecycle:** When `stdout` reaches EOF (user typed `:q` / `:qa` or nvim closed), `NvimEvent::Exit` is sent, triggering `cx.quit()`.
 
-### B. View & Grid Rendering (`src/ui/`)
-* **Span Batching (`src/ui/grid.rs`):** Rather than rendering 80+ separate DOM elements per line, adjacent cells sharing identical highlight attributes (foreground, background, bold, italic, underline) are merged into single `CellSpan` elements for high GPU throughput.
+### B. View & Grid Rendering (`src/ui/components/`)
+* **Span Batching (`src/ui/components/grid.rs`):** Rather than rendering 80+ separate DOM elements per line, adjacent cells sharing identical highlight attributes (foreground, background, bold, italic, underline) are merged into single `CellSpan` elements for high GPU throughput.
 * **Layout Geometry:**
-  * Top titlebar: `32px` with `pl(px(78.0))` for macOS traffic light buttons.
+  * Top titlebar: `36px` with `pl(px(78.0))` for macOS traffic light buttons.
   * Grid area: Fills all remaining window height down to the bottom. Automatically recalculates `(cols, rows)` on window resize and notifies Neovim via `nvim_ui_try_resize`.
 
 ### C. Input & Mouse Management (`src/input.rs`, `src/ui/mod.rs`)
