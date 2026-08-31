@@ -1,3 +1,5 @@
+use gpui::*;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedGuiFont {
     pub family: Option<String>,
@@ -60,6 +62,46 @@ pub fn parse_guifont(guifont: &str) -> ParsedGuiFont {
     }
 
     result
+}
+
+use super::ZenviView;
+
+impl ZenviView {
+    /// Updates font family, size, char width and line height from Neovim's guifont/linespace options.
+    pub fn update_font(&mut self, guifont: &str, linespace: i64, cx: &App) {
+        let parsed = parse_guifont(guifont);
+
+        if let Some(family) = parsed.family {
+            self.font_family = family;
+        } else if guifont.is_empty() {
+            self.font_family = default_font_family().to_string();
+        }
+
+        let size: f32 = if let Some(s) = parsed.size {
+            s
+        } else if guifont.is_empty() {
+            14.0
+        } else {
+            self.font_size.into()
+        };
+
+        self.font_size = px(size);
+
+        // Measure actual monospace advance width using GPUI text system
+        let font_id = cx.text_system().resolve_font(&font(&self.font_family));
+        let advance: f32 = cx
+            .text_system()
+            .advance(font_id, self.font_size, '0')
+            .or_else(|_| cx.text_system().advance(font_id, self.font_size, 'm'))
+            .map(|s| s.width.into())
+            .unwrap_or(size * 0.6015);
+        self.char_width = advance;
+
+        // Line height calculation: terminal monospace 1.2x ratio + linespace pixels
+        let base_lh = (size * 1.2).round();
+        let final_lh = (base_lh + linespace as f32).max(8.0);
+        self.line_height = px(final_lh);
+    }
 }
 
 #[cfg(test)]

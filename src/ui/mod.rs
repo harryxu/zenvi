@@ -1,5 +1,9 @@
+pub mod commands;
 pub mod font;
 pub mod grid;
+pub mod ime;
+pub mod mouse;
+pub mod titlebar;
 
 use crate::input::key_event_to_nvim;
 use crate::nvim::process::{NvimEvent, NvimSession};
@@ -7,28 +11,11 @@ use crate::{
     CloseBuffer, Copy, Cut, Escape, InstallCli, OpenFile, OpenFolder, Paste, Redo, ReloadNvim,
     SelectAll, Undo,
 };
-use font::{default_font_family, parse_guifont};
+use font::default_font_family;
 use gpui::*;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-
-fn mods_to_nvim(mods: &Modifiers) -> String {
-    let mut s = String::new();
-    if mods.control {
-        s.push('C');
-    }
-    if mods.shift {
-        s.push('S');
-    }
-    if mods.alt {
-        s.push('A');
-    }
-    if mods.platform {
-        s.push('D');
-    }
-    s
-}
 
 pub const TITLEBAR_HEIGHT: f32 = 36.0;
 pub const GRID_PADDING_TOP: f32 = 6.0;
@@ -51,7 +38,7 @@ pub struct ZenviView {
     pub scroll_accum_y: f32,
     pub cwd: Option<PathBuf>,
     pub marked_text: Option<String>,
-    _event_task: Option<Task<()>>,
+    pub(crate) _event_task: Option<Task<()>>,
 }
 
 impl ZenviView {
@@ -112,7 +99,7 @@ impl ZenviView {
             }
         }
 
-        let font_family = "Menlo".to_string();
+        let font_family = default_font_family().to_string();
         let font_size = px(14.0);
         let line_height = px((14.0_f32 * 1.2_f32).round());
 
@@ -146,7 +133,7 @@ impl ZenviView {
         }
     }
 
-    fn spawn_event_listener(
+    pub(crate) fn spawn_event_listener(
         mut event_rx: mpsc::UnboundedReceiver<NvimEvent>,
         window_handle: AnyWindowHandle,
         cx: &mut Context<Self>,
@@ -174,371 +161,11 @@ impl ZenviView {
             }
         })
     }
-
-    pub fn reload_nvim(&mut self, cx: &mut Context<Self>) {
-        log::info!("Reloading Neovim session...");
-        let old_session = Arc::clone(&self.session);
-        let last_cols = self.last_cols;
-        let last_rows = self.last_rows;
-        let fallback_cwd = self.cwd.clone();
-        let window_handle = self.window_handle;
-
-        self._event_task = None;
-
-        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let mut cx = cx.clone();
-            async move {
-                // 1. Check auto-session status and save session if active
-                let check_lua = r#"
-                    local ok, auto_session = pcall(require, "auto-session")
-                    if not ok or not auto_session then
-                        return { has_auto_session = false, should_restore = false, cwd = vim.fn.getcwd() }
-                    end
-
-                    local is_session_active = false
-                    local this_session = vim.v.this_session
-                    if this_session and this_session ~= "" then
-                        is_session_active = true
-                    else
-                        local lib_ok, lib = pcall(require, "auto-session.lib")
-                        if lib_ok and lib and lib.get_session_file_name then
-                            local sfile = lib.get_session_file_name()
-                            if sfile and vim.fn.filereadable(sfile) == 1 then
-                                is_session_active = true
-                            end
-                        end
-                    end
-
-                    -- Check if any named file buffers are currently open
-                    local bufs = vim.fn.getbufinfo({ buflisted = 1 })
-                    local has_valid_buffers = false
-                    for _, b in ipairs(bufs) do
-                        if b.name and b.name ~= "" then
-                            has_valid_buffers = true
-                            break
-                        end
-                    end
-
-                    local should_restore = false
-                    if is_session_active or has_valid_buffers then
-                        pcall(auto_session.save_session)
-                        should_restore = true
-                    end
-
-                    return {
-                        has_auto_session = true,
-                        should_restore = should_restore,
-                        cwd = vim.fn.getcwd(),
-                    }
-                "#;
-
-                let (should_restore, current_cwd) = match old_session.exec_lua(check_lua, vec![]).await {
-                    Ok(val) => {
-                        let mut should_restore = false;
-                        let mut cwd_opt = None;
-                        if let Some(map) = val.as_map() {
-                            for (k, v) in map {
-                                if k.as_str() == Some("should_restore") {
-                                    should_restore = v.as_bool().unwrap_or(false);
-                                } else if k.as_str() == Some("cwd") {
-                                    if let Some(s) = v.as_str() {
-                                        if !s.is_empty() {
-                                            cwd_opt = Some(PathBuf::from(s));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        (should_restore, cwd_opt.or(fallback_cwd))
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to query auto-session before reload: {:?}", e);
-                        (false, fallback_cwd)
-                    }
-                };
-
-                // 2. Terminate old session
-                old_session.kill();
-
-                // 3. Spawn new session in background
-                let (event_tx, event_rx) = mpsc::unbounded_channel::<NvimEvent>();
-                match NvimSession::spawn(event_tx, current_cwd.clone()) {
-                    Ok(new_session) => {
-                        new_session.attach_ui(last_cols, last_rows);
-                        new_session.send_command("set mouse=a");
-
-                        if let Some(ref dir) = current_cwd {
-                            new_session.send_command(&format!("cd {}", dir.display()));
-                        }
-
-                        // 4. If auto-session was active, restore session in new instance
-                        if should_restore {
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                            let restore_lua = r#"
-                                (function()
-                                    local ok, auto_session = pcall(require, "auto-session")
-                                    if ok and auto_session then
-                                        pcall(auto_session.restore_session)
-                                    end
-                                end)()
-                            "#;
-                            new_session.send_command(&format!("lua {}", restore_lua));
-                        }
-
-                        let _ = this.update(&mut cx, |this, cx| {
-                            this.session = new_session;
-                            this.cwd = current_cwd;
-                            this.last_guifont = String::new();
-                            this.last_linespace = 0;
-                            this._event_task = Some(Self::spawn_event_listener(event_rx, window_handle, cx));
-                            cx.notify();
-                        });
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to reload Neovim: {:?}", e);
-                    }
-                }
-            }
-        })
-        .detach();
-    }
-
-    pub fn open_file(&mut self, cx: &mut Context<Self>) {
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some("Open File".into()),
-        });
-        let session = Arc::clone(&self.session);
-        cx.spawn(|this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let mut cx = cx.clone();
-            async move {
-                if let Ok(Ok(Some(paths))) = receiver.await {
-                    for path in paths {
-                        if let Some(parent) = path.parent() {
-                            let _ = this.update(&mut cx, |this, _cx| {
-                                this.cwd = Some(parent.to_path_buf());
-                            });
-                            session.send_command(&format!("cd {}", parent.display()));
-                        }
-                        session.send_command(&format!("edit {}", path.display()));
-                    }
-                }
-            }
-        })
-        .detach();
-    }
-
-    pub fn open_folder(&mut self, cx: &mut Context<Self>) {
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Open Folder".into()),
-        });
-        let session = Arc::clone(&self.session);
-        cx.spawn(|this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let mut cx = cx.clone();
-            async move {
-                if let Ok(Ok(Some(paths))) = receiver.await {
-                    for path in paths {
-                        let _ = this.update(&mut cx, |this, _cx| {
-                            this.cwd = Some(path.clone());
-                        });
-                        session.send_command(&format!("cd {}", path.display()));
-                        session.send_command(&format!("edit {}", path.display()));
-                    }
-                }
-            }
-        })
-        .detach();
-    }
-
-    pub fn open_paths(&mut self, paths: &[PathBuf]) {
-        for path in paths {
-            if path.is_dir() {
-                self.cwd = Some(path.clone());
-                self.session.send_command(&format!("cd {}", path.display()));
-                self.session.send_command(&format!("edit {}", path.display()));
-            } else {
-                if let Some(parent) = path.parent() {
-                    if parent.exists() && parent.as_os_str() != "" {
-                        self.cwd = Some(parent.to_path_buf());
-                        self.session.send_command(&format!("cd {}", parent.display()));
-                    }
-                }
-                self.session.send_command(&format!("edit {}", path.display()));
-            }
-        }
-    }
-
-    pub fn paste(&mut self, cx: &mut Context<Self>) {
-        if let Some(item) = cx.read_from_clipboard() {
-            if let Some(text) = item.text() {
-                self.session.paste(&text);
-            }
-        }
-    }
-
-    pub fn copy(&mut self, _cx: &mut Context<Self>) {
-        self.session.send_command(r#"lua (function()
-            local mode = vim.api.nvim_get_mode().mode
-            if mode:find("[vV\x16]") then
-                vim.cmd('normal! "+y')
-            end
-        end)()"#);
-    }
-
-    pub fn cut(&mut self, _cx: &mut Context<Self>) {
-        self.session.send_command(r#"lua (function()
-            local mode = vim.api.nvim_get_mode().mode
-            if mode:find("[vV\x16]") then
-                vim.cmd('normal! "+d')
-            end
-        end)()"#);
-    }
-
-    pub fn select_all(&mut self, _cx: &mut Context<Self>) {
-        self.session.send_command(r#"lua (function()
-            local mode = vim.api.nvim_get_mode().mode
-            if mode:find("[iR]") then
-                vim.cmd('stopinsert')
-            end
-            vim.cmd('normal! ggVG')
-        end)()"#);
-    }
-
-    pub fn undo(&mut self, _cx: &mut Context<Self>) {
-        self.session.send_command(r#"lua (function()
-            local mode = vim.api.nvim_get_mode().mode
-            if mode:find("[iR]") then
-                vim.cmd('stopinsert')
-            end
-            pcall(vim.cmd, 'undo')
-        end)()"#);
-    }
-
-    pub fn redo(&mut self, _cx: &mut Context<Self>) {
-        self.session.send_command(r#"lua (function()
-            local mode = vim.api.nvim_get_mode().mode
-            if mode:find("[iR]") then
-                vim.cmd('stopinsert')
-            end
-            pcall(vim.cmd, 'redo')
-        end)()"#);
-    }
-
-    pub fn install_cli(&mut self, _cx: &mut Context<Self>) {
-        match crate::cli::install_shell_command() {
-            Ok(symlink_path) => {
-                log::info!("Shell command successfully installed to {}", symlink_path.display());
-                self.session.send_command(&format!(
-                    "lua pcall(vim.notify, 'Successfully installed \"zenvi\" command to: {}', vim.log.levels.INFO)",
-                    symlink_path.display()
-                ));
-            }
-            Err(e) => {
-                log::error!("Failed to install shell command: {:?}", e);
-                self.session.send_command(&format!(
-                    "lua pcall(vim.notify, 'Failed to install zenvi command: {}', vim.log.levels.ERROR)",
-                    e
-                ));
-            }
-        }
-    }
-
-    pub fn close_buffer(&mut self, _cx: &mut Context<Self>) {
-        let lua_cmd = r##"lua (function()
-            local cur = vim.api.nvim_get_current_buf()
-            local bufs = vim.tbl_filter(function(b)
-                return vim.api.nvim_buf_is_valid(b) and vim.bo[b].buflisted
-            end, vim.api.nvim_list_bufs())
-
-            if #bufs <= 1 then
-                vim.cmd("confirm quit")
-                return
-            end
-
-            local alt = vim.fn.bufnr("#")
-            local next_buf = nil
-            if alt > 0 and alt ~= cur and vim.api.nvim_buf_is_valid(alt) and vim.bo[alt].buflisted then
-                next_buf = alt
-            else
-                for _, b in ipairs(bufs) do
-                    if b ~= cur then
-                        next_buf = b
-                        break
-                    end
-                end
-            end
-
-            if next_buf then
-                for _, w in ipairs(vim.api.nvim_list_wins()) do
-                    if vim.api.nvim_win_is_valid(w) and vim.api.nvim_win_get_buf(w) == cur then
-                        vim.api.nvim_win_set_buf(w, next_buf)
-                    end
-                end
-            end
-
-            vim.cmd("confirm bdelete " .. cur)
-        end)()"##;
-        self.session.send_command(lua_cmd);
-    }
-
-    fn update_font(&mut self, guifont: &str, linespace: i64, cx: &App) {
-        let parsed = parse_guifont(guifont);
-
-        if let Some(family) = parsed.family {
-            self.font_family = family;
-        } else if guifont.is_empty() {
-            self.font_family = default_font_family().to_string();
-        }
-
-        let size: f32 = if let Some(s) = parsed.size {
-            s
-        } else if guifont.is_empty() {
-            14.0
-        } else {
-            self.font_size.into()
-        };
-
-        self.font_size = px(size);
-
-        // Measure actual monospace advance width using GPUI text system
-        let font_id = cx.text_system().resolve_font(&font(&self.font_family));
-        let advance: f32 = cx
-            .text_system()
-            .advance(font_id, self.font_size, '0')
-            .or_else(|_| cx.text_system().advance(font_id, self.font_size, 'm'))
-            .map(|s| s.width.into())
-            .unwrap_or(size * 0.6015);
-        self.char_width = advance;
-
-        // Line height calculation: terminal monospace 1.2x ratio + linespace pixels
-        let base_lh = (size * 1.2).round();
-        let final_lh = (base_lh + linespace as f32).max(8.0);
-        self.line_height = px(final_lh);
-    }
-
-    fn pos_to_grid(&self, pos: Point<Pixels>) -> (usize, usize) {
-        let x: f32 = pos.x.into();
-        let y: f32 = pos.y.into();
-
-        let lh: f32 = self.line_height.into();
-
-        let col = ((x - GRID_PADDING_LEFT) / self.char_width).floor().max(0.0) as usize;
-        let row = ((y - TOP_OFFSET) / lh).floor().max(0.0) as usize;
-
-        (
-            col.min(self.last_cols.saturating_sub(1)),
-            row.min(self.last_rows.saturating_sub(1)),
-        )
-    }
 }
 
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Check for guifont / linespace changes from Neovim
         let (guifont_changed, new_guifont, new_linespace) = {
             let state = self.session.state.read();
             if state.guifont != self.last_guifont || state.linespace != self.last_linespace {
@@ -563,42 +190,7 @@ impl Render for ZenviView {
             state.title.clone()
         };
 
-        // Derive titlebar colors harmoniously from Neovim's active theme
-        let (bg_r, bg_g, bg_b) = (
-            ((default_bg >> 16) & 0xff) as f32,
-            ((default_bg >> 8) & 0xff) as f32,
-            (default_bg & 0xff) as f32,
-        );
-        let luminance = 0.299 * bg_r + 0.587 * bg_g + 0.114 * bg_b;
-        let is_dark = luminance < 128.0;
-
-        let title_color = rgb(default_fg);
-        let badge_color = if is_dark {
-            rgb(
-                (((bg_r + 80.0).min(200.0) as u32) << 16)
-                    | (((bg_g + 80.0).min(200.0) as u32) << 8)
-                    | ((bg_b + 80.0).min(200.0) as u32),
-            )
-        } else {
-            rgb(
-                ((((bg_r - 80.0).max(60.0)) as u32) << 16)
-                    | ((((bg_g - 80.0).max(60.0)) as u32) << 8)
-                    | (((bg_b - 80.0).max(60.0)) as u32),
-            )
-        };
-        let border_color = if is_dark {
-            rgb(
-                (((bg_r + 18.0).min(255.0) as u32) << 16)
-                    | (((bg_g + 18.0).min(255.0) as u32) << 8)
-                    | ((bg_b + 18.0).min(255.0) as u32),
-            )
-        } else {
-            rgb(
-                ((((bg_r - 25.0).max(0.0)) as u32) << 16)
-                    | ((((bg_g - 25.0).max(0.0)) as u32) << 8)
-                    | (((bg_b - 25.0).max(0.0)) as u32),
-            )
-        };
+        let style = titlebar::derive_titlebar_style(default_bg, default_fg);
 
         let grid = state
             .grids
@@ -612,7 +204,9 @@ impl Render for ZenviView {
 
         let lh: f32 = self.line_height.into();
 
-        let cols = ((window_w - GRID_PADDING_LEFT) / self.char_width).floor().max(20.0) as usize;
+        let cols = ((window_w - GRID_PADDING_LEFT) / self.char_width)
+            .floor()
+            .max(20.0) as usize;
         let rows = ((window_h - TOP_OFFSET) / lh).floor().max(5.0) as usize;
 
         if cols != self.last_cols || rows != self.last_rows {
@@ -641,6 +235,7 @@ impl Render for ZenviView {
             .bg(rgb(default_bg))
             .track_focus(&self.focus_handle)
             .key_context("zenvi")
+            // Action bindings
             .on_action(cx.listener(|this, _: &ReloadNvim, _window, cx| {
                 this.reload_nvim(cx);
             }))
@@ -677,6 +272,7 @@ impl Render for ZenviView {
             .on_action(cx.listener(|this, _: &Escape, _window, _cx| {
                 this.session.send_input("<Esc>");
             }))
+            // IME input handler canvas
             .child(
                 canvas(
                     |_bounds, _window, _cx| {},
@@ -690,6 +286,7 @@ impl Render for ZenviView {
                 )
                 .size_0(),
             )
+            // Keyboard input
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, _cx| {
                 if this.marked_text.is_some() {
                     return;
@@ -698,160 +295,57 @@ impl Render for ZenviView {
                     this.session.send_input(&nvim_key);
                 }
             }))
+            // Mouse event handlers
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                    window.focus(&this.focus_handle);
-                    this.is_mouse_down = true;
-                    let (col, row) = this.pos_to_grid(event.position);
-                    let mods = mods_to_nvim(&event.modifiers);
-                    this.session.send_mouse("left", "press", &mods, 0, row, col);
+                    this.handle_mouse_down("left", event.position, &event.modifiers, window);
                 }),
             )
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                    window.focus(&this.focus_handle);
-                    let (col, row) = this.pos_to_grid(event.position);
-                    let mods = mods_to_nvim(&event.modifiers);
-                    this.session.send_mouse("right", "press", &mods, 0, row, col);
+                    this.handle_mouse_down("right", event.position, &event.modifiers, window);
                 }),
             )
             .on_mouse_down(
                 MouseButton::Middle,
                 cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                    window.focus(&this.focus_handle);
-                    let (col, row) = this.pos_to_grid(event.position);
-                    let mods = mods_to_nvim(&event.modifiers);
-                    this.session.send_mouse("middle", "press", &mods, 0, row, col);
+                    this.handle_mouse_down("middle", event.position, &event.modifiers, window);
                 }),
             )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                    this.is_mouse_down = false;
-                    let (col, row) = this.pos_to_grid(event.position);
-                    let mods = mods_to_nvim(&event.modifiers);
-                    this.session.send_mouse("left", "release", &mods, 0, row, col);
+                    this.handle_mouse_up("left", event.position, &event.modifiers);
                 }),
             )
             .on_mouse_up(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                    let (col, row) = this.pos_to_grid(event.position);
-                    let mods = mods_to_nvim(&event.modifiers);
-                    this.session.send_mouse("right", "release", &mods, 0, row, col);
+                    this.handle_mouse_up("right", event.position, &event.modifiers);
                 }),
             )
             .on_mouse_up(
                 MouseButton::Middle,
                 cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                    let (col, row) = this.pos_to_grid(event.position);
-                    let mods = mods_to_nvim(&event.modifiers);
-                    this.session.send_mouse("middle", "release", &mods, 0, row, col);
+                    this.handle_mouse_up("middle", event.position, &event.modifiers);
                 }),
             )
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, _cx| {
-                if this.is_mouse_down {
-                    let (col, row) = this.pos_to_grid(event.position);
-                    let mods = mods_to_nvim(&event.modifiers);
-                    this.session.send_mouse("left", "drag", &mods, 0, row, col);
-                }
+                this.handle_mouse_move(event);
             }))
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
-                let (col, row) = this.pos_to_grid(event.position);
-                let mods = mods_to_nvim(&event.modifiers);
-
-                match event.delta {
-                    ScrollDelta::Pixels(p) => {
-                        let dy: f32 = p.y.into();
-                        this.scroll_accum_y += dy;
-                        let step = 15.0;
-                        while this.scroll_accum_y >= step {
-                            this.scroll_accum_y -= step;
-                            this.session.send_mouse("wheel", "up", &mods, 0, row, col);
-                        }
-                        while this.scroll_accum_y <= -step {
-                            this.scroll_accum_y += step;
-                            this.session.send_mouse("wheel", "down", &mods, 0, row, col);
-                        }
-                    }
-                    ScrollDelta::Lines(l) => {
-                        let lines = l.y;
-                        if lines > 0.0 {
-                            for _ in 0..(lines.round().abs() as usize) {
-                                this.session.send_mouse("wheel", "up", &mods, 0, row, col);
-                            }
-                        } else if lines < 0.0 {
-                            for _ in 0..(lines.round().abs() as usize) {
-                                this.session.send_mouse("wheel", "down", &mods, 0, row, col);
-                            }
-                        }
-                    }
-                }
+                this.handle_scroll_wheel(event);
             }))
+            // Drag-and-drop
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
                 this.open_paths(paths.paths());
             }))
-            .child({
-                #[cfg(target_os = "macos")]
-                let titlebar_pl = px(78.0);
-                #[cfg(not(target_os = "macos"))]
-                let titlebar_pl = px(12.0);
-
-                // Top Custom Titlebar: Leaves room (pl 78px) for macOS traffic light buttons
-                div()
-                    .id("zenvi-titlebar")
-                    .h(px(TITLEBAR_HEIGHT))
-                    .w_full()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .pl(titlebar_pl)
-                    .pr(px(12.0))
-                    .bg(rgb(default_bg))
-                    .border_b_1()
-                    .border_color(border_color)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|_this, event: &MouseDownEvent, window, cx| {
-                            cx.stop_propagation();
-                            if event.click_count == 2 {
-                                window.titlebar_double_click();
-                            }
-                        }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(title_color)
-                                    .child(title),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(badge_color)
-                                    .child("⚡️ GPUI"),
-                            )
-                    )
-            })
+            // Titlebar
+            .child(titlebar::render_titlebar(&title, &style, default_bg, cx))
+            // Editor grid area
             .child(
-                // Editor Main Grid Area
                 div()
                     .flex_1()
                     .w_full()
@@ -860,122 +354,5 @@ impl Render for ZenviView {
                     .overflow_hidden()
                     .child(grid_element),
             )
-    }
-}
-
-impl EntityInputHandler for ZenviView {
-    fn text_for_range(
-        &mut self,
-        range_utf16: std::ops::Range<usize>,
-        actual_range: &mut Option<std::ops::Range<usize>>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> Option<String> {
-        if let Some(ref text) = self.marked_text {
-            let u16_chars: Vec<u16> = text.encode_utf16().collect();
-            let start = range_utf16.start.min(u16_chars.len());
-            let end = range_utf16.end.min(u16_chars.len());
-            if start <= end {
-                *actual_range = Some(start..end);
-                return Some(String::from_utf16_lossy(&u16_chars[start..end]));
-            }
-        }
-        None
-    }
-
-    fn selected_text_range(
-        &mut self,
-        _ignore_disabled_input: bool,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> Option<UTF16Selection> {
-        let len = self
-            .marked_text
-            .as_ref()
-            .map(|t| t.encode_utf16().count())
-            .unwrap_or(0);
-        Some(UTF16Selection {
-            range: len..len,
-            reversed: false,
-        })
-    }
-
-    fn marked_text_range(
-        &self,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> Option<std::ops::Range<usize>> {
-        self.marked_text
-            .as_ref()
-            .map(|t| 0..t.encode_utf16().count())
-    }
-
-    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.marked_text = None;
-    }
-
-    fn replace_text_in_range(
-        &mut self,
-        _range_utf16: Option<std::ops::Range<usize>>,
-        new_text: &str,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) {
-        self.marked_text = None;
-        if !new_text.is_empty() {
-            if new_text == "<" {
-                self.session.send_input("<lt>");
-            } else {
-                self.session.send_input(new_text);
-            }
-        }
-    }
-
-    fn replace_and_mark_text_in_range(
-        &mut self,
-        _range_utf16: Option<std::ops::Range<usize>>,
-        new_text: &str,
-        _new_selected_range_utf16: Option<std::ops::Range<usize>>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) {
-        if new_text.is_empty() {
-            self.marked_text = None;
-        } else {
-            self.marked_text = Some(new_text.to_string());
-        }
-    }
-
-    fn bounds_for_range(
-        &mut self,
-        _range_utf16: std::ops::Range<usize>,
-        element_bounds: Bounds<Pixels>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> Option<Bounds<Pixels>> {
-        let state = self.session.state.read();
-        let (cursor_row, cursor_col) = state
-            .grids
-            .get(&1)
-            .map(|g| (g.cursor_row, g.cursor_col))
-            .unwrap_or((0, 0));
-        drop(state);
-
-        let x = GRID_PADDING_LEFT + cursor_col as f32 * self.char_width;
-        let y = TOP_OFFSET + cursor_row as f32 * f32::from(self.line_height);
-        let cursor_bounds = Bounds::new(
-            Point::new(element_bounds.origin.x + px(x), element_bounds.origin.y + px(y)),
-            Size::new(px(self.char_width), self.line_height),
-        );
-        Some(cursor_bounds)
-    }
-
-    fn character_index_for_point(
-        &mut self,
-        _point: Point<Pixels>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> Option<usize> {
-        Some(0)
     }
 }
