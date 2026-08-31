@@ -354,7 +354,7 @@ impl ZenviView {
                 "   A lightweight, GPU-accelerated desktop",
                 "   frontend for Neovim built with GPUI.",
                 "",
-                "   https://github.com/harryzhxu/zenvi",
+                "   https://github.com/harryxu/zenvi",
                 "",
                 "   [ Press 'q' or <Esc> to close ]",
                 ""
