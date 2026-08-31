@@ -801,6 +801,7 @@ impl Render for ZenviView {
 
                 // Top Custom Titlebar: Leaves room (pl 78px) for macOS traffic light buttons
                 div()
+                    .id("zenvi-titlebar")
                     .h(px(TITLEBAR_HEIGHT))
                     .w_full()
                     .flex()
@@ -812,6 +813,15 @@ impl Render for ZenviView {
                     .bg(rgb(default_bg))
                     .border_b_1()
                     .border_color(border_color)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_this, event: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            if event.click_count == 2 {
+                                window.titlebar_double_click();
+                            }
+                        }),
+                    )
                     .child(
                         div()
                             .flex()
