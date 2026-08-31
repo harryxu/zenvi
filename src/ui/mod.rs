@@ -38,6 +38,7 @@ pub struct ZenviView {
     pub scroll_accum_y: f32,
     pub cwd: Option<PathBuf>,
     pub marked_text: Option<String>,
+    pub active_menu: Option<titlebar::ActiveMenu>,
     pub(crate) _event_task: Option<Task<()>>,
 }
 
@@ -129,6 +130,7 @@ impl ZenviView {
             scroll_accum_y: 0.0,
             cwd,
             marked_text: None,
+            active_menu: None,
             _event_task: Some(event_task),
         }
     }
@@ -276,6 +278,13 @@ impl Render for ZenviView {
         let state = self.session.state.read();
         let default_bg = state.default_bg;
 
+        let title = if state.title.is_empty() {
+            "Zenvi"
+        } else {
+            &state.title
+        };
+        window.set_window_title(title);
+
         let default_grid = crate::nvim::state::Grid::new(1, 80, 24);
         let grid = state
             .grids
@@ -340,7 +349,15 @@ impl Render for ZenviView {
                 .size_0(),
             )
             // Keyboard input
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, _cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                if this.active_menu.is_some() {
+                    let is_esc = event.keystroke.key == "escape" || event.keystroke.key == "Esc" || event.keystroke.key == "\u{1b}";
+                    this.active_menu = None;
+                    cx.notify();
+                    if is_esc {
+                        return;
+                    }
+                }
                 if this.marked_text.is_some() {
                     return;
                 }
@@ -351,19 +368,27 @@ impl Render for ZenviView {
 
         let root = Self::bind_mouse_handlers(root, cx);
 
-        root.on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
-            this.open_paths(paths.paths());
-        }))
-        .child(titlebar::render_titlebar(&state, cx))
-        .child(
-            div()
-                .flex_1()
-                .w_full()
-                .pt(px(GRID_PADDING_TOP))
-                .pl(px(GRID_PADDING_LEFT))
-                .overflow_hidden()
-                .child(grid_element),
-        )
+        let mut root = root
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
+                this.open_paths(paths.paths());
+            }))
+            .child(titlebar::render_titlebar(&state, self.active_menu, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .w_full()
+                    .pt(px(GRID_PADDING_TOP))
+                    .pl(px(GRID_PADDING_LEFT))
+                    .overflow_hidden()
+                    .child(grid_element),
+            );
+
+        #[cfg(not(target_os = "macos"))]
+        if let Some(active) = self.active_menu {
+            root = root.child(titlebar::render_menu_dropdown(active, &state, cx));
+        }
+
+        root
     }
 }
 
