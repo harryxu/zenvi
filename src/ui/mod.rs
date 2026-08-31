@@ -38,7 +38,9 @@ pub struct ZenviView {
     pub cwd: Option<PathBuf>,
     pub marked_text: Option<String>,
     #[cfg(not(target_os = "macos"))]
-    pub active_menu: Option<crate::menu::ActiveMenu>,
+    pub is_menu_open: bool,
+    #[cfg(not(target_os = "macos"))]
+    pub active_submenu: Option<usize>,
     pub(crate) _event_task: Option<Task<()>>,
 }
 
@@ -135,7 +137,9 @@ impl ZenviView {
             cwd,
             marked_text: None,
             #[cfg(not(target_os = "macos"))]
-            active_menu: None,
+            is_menu_open: false,
+            #[cfg(not(target_os = "macos"))]
+            active_submenu: None,
             _event_task: Some(event_task),
         }
     }
@@ -330,6 +334,7 @@ impl Render for ZenviView {
         let root = div()
             .id("zenvi-root")
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .bg(rgb(default_bg))
@@ -356,9 +361,10 @@ impl Render for ZenviView {
             // Keyboard input
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, _cx| {
                 #[cfg(not(target_os = "macos"))]
-                if this.active_menu.is_some() {
+                if this.is_menu_open {
                     let is_esc = event.keystroke.key == "escape" || event.keystroke.key == "Esc" || event.keystroke.key == "\u{1b}";
-                    this.active_menu = None;
+                    this.is_menu_open = false;
+                    this.active_submenu = None;
                     _cx.notify();
                     if is_esc {
                         return;
@@ -377,7 +383,7 @@ impl Render for ZenviView {
         #[cfg(target_os = "macos")]
         let titlebar_element = components::titlebar::render_titlebar(&state, cx);
         #[cfg(not(target_os = "macos"))]
-        let titlebar_element = components::titlebar::render_titlebar(&state, self.active_menu, cx);
+        let titlebar_element = components::titlebar::render_titlebar(&state, self.is_menu_open, cx);
 
         let root = root
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
@@ -395,8 +401,8 @@ impl Render for ZenviView {
             );
 
         #[cfg(not(target_os = "macos"))]
-        let root = if let Some(active) = self.active_menu {
-            root.child(crate::menu::render_menu_dropdown(active, &state, cx))
+        let root = if self.is_menu_open {
+            root.child(crate::menu::render_app_menu(&state, self.active_submenu, cx))
         } else {
             root
         };

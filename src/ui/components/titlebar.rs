@@ -4,9 +4,6 @@ use crate::ui::{ZenviView, TITLEBAR_HEIGHT};
 use gpui::prelude::*;
 use gpui::*;
 
-#[cfg(not(target_os = "macos"))]
-use crate::menu::ActiveMenu;
-
 /// Builds the custom titlebar element directly from Neovim's state (macOS version).
 #[cfg(target_os = "macos")]
 pub fn render_titlebar(
@@ -77,14 +74,16 @@ pub fn render_titlebar(
 #[cfg(not(target_os = "macos"))]
 pub fn render_titlebar(
     state: &NvimState,
-    active_menu: Option<ActiveMenu>,
+    is_menu_open: bool,
     cx: &mut Context<ZenviView>,
 ) -> Stateful<Div> {
+    let title = if state.title.is_empty() {
+        "Zenvi"
+    } else {
+        &state.title
+    };
     let style = derive_titlebar_style(state.default_bg, state.default_fg);
     let default_bg = state.default_bg;
-
-    let file_active = active_menu == Some(ActiveMenu::File);
-    let edit_active = active_menu == Some(ActiveMenu::Edit);
 
     let left_side = div()
         .flex()
@@ -93,72 +92,44 @@ pub fn render_titlebar(
         .gap(px(8.0))
         .child(
             div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(2.0))
-                .child(
-                    div()
-                        .id("menu-btn-file")
-                        .px(px(6.0))
-                        .py(px(2.0))
-                        .rounded_sm()
-                        .text_size(px(12.0))
-                        .text_color(style.title_color)
-                        .cursor_pointer()
-                        .when(file_active, |s| s.bg(style.menu_active_bg))
-                        .hover(move |s| s.bg(style.menu_hover_bg))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _window, cx| {
-                                cx.stop_propagation();
-                                this.active_menu = if this.active_menu == Some(ActiveMenu::File) {
-                                    None
-                                } else {
-                                    Some(ActiveMenu::File)
-                                };
-                                cx.notify();
-                            }),
-                        )
-                        .on_mouse_move(cx.listener(|this, _, _window, cx| {
-                            if this.active_menu.is_some() && this.active_menu != Some(ActiveMenu::File) {
-                                this.active_menu = Some(ActiveMenu::File);
-                                cx.notify();
-                            }
-                        }))
-                        .child("File"),
+                .text_size(px(12.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(style.title_color)
+                .child(title.to_string()),
+        );
+
+    let right_side = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .child(
+            div()
+                .text_size(px(11.0))
+                .text_color(style.badge_color)
+                .child("⚡️ GPUI"),
+        )
+        .child(
+            div()
+                .id("menu-btn-toggle")
+                .px(px(6.0))
+                .py(px(2.0))
+                .rounded_sm()
+                .text_size(px(13.0))
+                .text_color(style.title_color)
+                .cursor_pointer()
+                .when(is_menu_open, |s| s.bg(style.menu_active_bg))
+                .hover(move |s| s.bg(style.menu_hover_bg))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _window, cx| {
+                        cx.stop_propagation();
+                        this.is_menu_open = !this.is_menu_open;
+                        this.active_submenu = None;
+                        cx.notify();
+                    }),
                 )
-                .child(
-                    div()
-                        .id("menu-btn-edit")
-                        .px(px(6.0))
-                        .py(px(2.0))
-                        .rounded_sm()
-                        .text_size(px(12.0))
-                        .text_color(style.title_color)
-                        .cursor_pointer()
-                        .when(edit_active, |s| s.bg(style.menu_active_bg))
-                        .hover(move |s| s.bg(style.menu_hover_bg))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _window, cx| {
-                                cx.stop_propagation();
-                                this.active_menu = if this.active_menu == Some(ActiveMenu::Edit) {
-                                    None
-                                } else {
-                                    Some(ActiveMenu::Edit)
-                                };
-                                cx.notify();
-                            }),
-                        )
-                        .on_mouse_move(cx.listener(|this, _, _window, cx| {
-                            if this.active_menu.is_some() && this.active_menu != Some(ActiveMenu::Edit) {
-                                this.active_menu = Some(ActiveMenu::Edit);
-                                cx.notify();
-                            }
-                        }))
-                        .child("Edit"),
-                ),
+                .child("☰"),
         );
 
     div()
@@ -185,17 +156,5 @@ pub fn render_titlebar(
             }),
         )
         .child(left_side)
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(6.0))
-                .child(
-                    div()
-                        .text_size(px(11.0))
-                        .text_color(style.badge_color)
-                        .child("⚡️ GPUI"),
-                ),
-        )
+        .child(right_side)
 }

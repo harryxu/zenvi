@@ -61,7 +61,7 @@
             ├── mod.rs       # Component exports
             ├── grid.rs      # High-performance grid text & cell span renderer
             ├── titlebar.rs  # Window titlebar container (macOS traffic lights & Linux/Windows menu bar)
-            ├── dropdown.rs  # Generic dropdown menu overlay component
+            ├── menu.rs      # Generic hierarchical/cascading menu overlay component
             └── style.rs     # Theme-derived color palette calculation
 
 ---

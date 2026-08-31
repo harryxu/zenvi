@@ -48,7 +48,8 @@ impl ZenviView {
     ) {
         #[cfg(not(target_os = "macos"))]
         {
-            self.active_menu = None;
+            self.is_menu_open = false;
+            self.active_submenu = None;
         }
         window.focus(&self.focus_handle);
         if button == "left" {
