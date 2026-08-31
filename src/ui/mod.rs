@@ -38,7 +38,7 @@ pub struct ZenviView {
     pub cwd: Option<PathBuf>,
     pub marked_text: Option<String>,
     #[cfg(not(target_os = "macos"))]
-    pub active_menu: Option<components::menu::ActiveMenu>,
+    pub active_menu: Option<crate::menu::ActiveMenu>,
     pub(crate) _event_task: Option<Task<()>>,
 }
 
@@ -396,7 +396,7 @@ impl Render for ZenviView {
 
         #[cfg(not(target_os = "macos"))]
         let root = if let Some(active) = self.active_menu {
-            root.child(components::menu::render_menu_dropdown(active, &state, cx))
+            root.child(crate::menu::render_menu_dropdown(active, &state, cx))
         } else {
             root
         };

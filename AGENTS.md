@@ -40,7 +40,7 @@
     ├── main.rs              # App entry point, GPUI Application lifecycle & Tokio runtime initialization
     ├── actions.rs           # Centralized GPUI Action definitions (Quit, OpenFile, OpenFolder, OpenConfig, etc.)
     ├── keymap.rs            # Keyboard shortcuts mapping and registration
-    ├── menu.rs              # macOS Application menus hierarchy and action bindings
+    ├── menu.rs              # Application menu definitions (macOS native system menus & Linux/Windows dropdown dispatcher)
     ├── window.rs            # Window lifecycle management, cascade offset calculation & config path resolution
     ├── input.rs             # Keyboard event translation (GPUI KeyDownEvent -> Neovim key notation)
     ├── bin/
@@ -57,12 +57,11 @@
         ├── mouse.rs         # Mouse coordinate mapping and scroll handling
         ├── ime.rs           # Native IME composition handling
         ├── commands.rs      # Desktop commands (file picker, folder picker, reload)
-        └── components/      # Dedicated UI rendering components
+        └── components/      # Dedicated pure UI rendering components
             ├── mod.rs       # Component exports
             ├── grid.rs      # High-performance grid text & cell span renderer
             ├── titlebar.rs  # Window titlebar container (macOS traffic lights & Linux/Windows menu bar)
             ├── dropdown.rs  # Generic dropdown menu overlay component
-            ├── menu.rs      # Linux/Windows menu item definitions and dropdown dispatcher
             └── style.rs     # Theme-derived color palette calculation
 
 ---

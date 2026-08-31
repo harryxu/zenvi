@@ -5,7 +5,7 @@ use gpui::prelude::*;
 use gpui::*;
 
 #[cfg(not(target_os = "macos"))]
-use super::menu::ActiveMenu;
+use crate::menu::ActiveMenu;
 
 /// Builds the custom titlebar element directly from Neovim's state (macOS version).
 #[cfg(target_os = "macos")]
