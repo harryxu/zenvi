@@ -4,6 +4,7 @@ actions!(
     zenvi,
     [
         Quit,
+        About,
         NewWindow,
         OpenFile,
         OpenFolder,

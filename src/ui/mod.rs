@@ -7,7 +7,7 @@ pub mod mouse;
 use crate::input::key_event_to_nvim;
 use crate::nvim::process::{NvimEvent, NvimSession};
 use crate::{
-    CloseBuffer, Copy, Cut, Escape, InstallCli, OpenFile, OpenFolder, Paste, Redo, ReloadNvim,
+    About, CloseBuffer, Copy, Cut, Escape, InstallCli, OpenFile, OpenFolder, Paste, Redo, ReloadNvim,
     SelectAll, Undo,
 };
 use font::resolve_default_font_family;
@@ -194,7 +194,10 @@ impl ZenviView {
 
     /// Binds all GPUI action handlers to the root element.
     fn bind_actions(root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
-        root.on_action(cx.listener(|this, _: &ReloadNvim, _window, cx| {
+        root.on_action(cx.listener(|this, _: &About, _window, cx| {
+            this.show_about(cx);
+        }))
+        .on_action(cx.listener(|this, _: &ReloadNvim, _window, cx| {
             this.reload_nvim(cx);
         }))
         .on_action(cx.listener(|this, _: &InstallCli, _window, cx| {

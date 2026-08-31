@@ -55,19 +55,6 @@ pub fn render_titlebar(
             }),
         )
         .child(left_side)
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(6.0))
-                .child(
-                    div()
-                        .text_size(px(11.0))
-                        .text_color(style.badge_color)
-                        .child("⚡️ GPUI"),
-                ),
-        )
 }
 
 /// Builds the custom titlebar element directly from Neovim's state (Linux / Windows version).
@@ -103,12 +90,6 @@ pub fn render_titlebar(
         .flex_row()
         .items_center()
         .gap(px(8.0))
-        .child(
-            div()
-                .text_size(px(11.0))
-                .text_color(style.badge_color)
-                .child("⚡️ GPUI"),
-        )
         .child(
             div()
                 .id("menu-btn-toggle")

@@ -19,6 +19,8 @@ pub fn init_menus(cx: &mut App) {
             Menu {
                 name: "Zenvi".into(),
                 items: vec![
+                    GpuiMenuItem::action("About Zenvi", About),
+                    GpuiMenuItem::separator(),
                     GpuiMenuItem::action("Open Neovim Config", OpenConfig),
                     GpuiMenuItem::separator(),
                     GpuiMenuItem::action("Reload Neovim", ReloadNvim),
@@ -138,6 +140,10 @@ pub fn edit_menu_items() -> Vec<MenuItem> {
 #[cfg(not(target_os = "macos"))]
 pub fn build_main_menu() -> Vec<MenuItem> {
     vec![
+        MenuItem::action("About Zenvi", "", |this, _window, cx| {
+            this.show_about(cx);
+        }),
+        MenuItem::separator(),
         MenuItem::action("Open Neovim Config", "Ctrl+Shift+,", |_this, _window, cx| {
             let config_dir = crate::window::get_nvim_config_dir();
             if !config_dir.exists() {
