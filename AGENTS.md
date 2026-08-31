@@ -45,20 +45,21 @@
     ├── input.rs             # Keyboard event translation (GPUI KeyDownEvent -> Neovim key notation)
     ├── bin/
     │   └── generate_icon.rs # Asset & icon rasterizer / icns compiler tool
+    ├── cli.rs               # Command-line arguments parsing
+    ├── nvim.rs              # Nvim submodule definitions and exports
     ├── nvim/
-    │   ├── mod.rs           # Submodule definitions
     │   ├── process.rs       # Background nvim child process, stdio pipes, NvimSession API, NvimEvent channel
     │   ├── protocol.rs      # MessagePack-RPC encoder & parser (Request, Response, Notification)
     │   ├── events.rs        # Neovim `redraw` event dispatcher (grid_line, hl_attr_define, cursor_goto, etc.)
     │   └── state.rs         # In-memory screen grid buffers, highlight lookup table, cursor & mode state
+    ├── ui.rs                # ZenviView (Root view, layout composition, mouse & drag-and-drop events)
     └── ui/
-        ├── mod.rs           # ZenviView (Root view, layout composition, mouse & drag-and-drop events)
         ├── font.rs          # Neovim guifont & linespace parser and font metrics calculator
         ├── mouse.rs         # Mouse coordinate mapping and scroll handling
         ├── ime.rs           # Native IME composition handling
         ├── commands.rs      # Desktop commands (file picker, folder picker, reload)
+        ├── components.rs    # UI component exports
         └── components/      # Dedicated pure UI rendering components
-            ├── mod.rs       # Component exports
             ├── grid.rs      # High-performance grid text & cell span renderer
             ├── titlebar.rs  # Window titlebar container (macOS traffic lights & Linux/Windows menu bar)
             ├── menu.rs      # Generic hierarchical/cascading menu overlay component
@@ -84,9 +85,9 @@
   * Top titlebar: `36px` with `pl(px(78.0))` for macOS traffic light buttons.
   * Grid area: Fills all remaining window height down to the bottom. Automatically recalculates `(cols, rows)` on window resize and notifies Neovim via `nvim_ui_try_resize`.
 
-### C. Input & Mouse Management (`src/input.rs`, `src/ui/mod.rs`)
+### C. Input & Mouse Management (`src/input.rs`, `src/ui.rs`)
 * **Keyboard (`src/input.rs`):** Converts GPUI `KeyDownEvent` into Neovim-compatible strings (e.g. `<CR>`, `<Esc>`, `<C-w>`, `<M-x>`, `<D-s>`, `<lt>`). System-level shortcuts (`Cmd+Q`, `Cmd+O`, `Cmd+Shift+O`) are bypassed to let GPUI native actions handle them.
-* **Mouse (`src/ui/mod.rs`):** Converts pixel coordinates `Point<Pixels>` into Neovim `(col, row)` and calls `nvim_input_mouse`:
+* **Mouse (`src/ui.rs`):** Converts pixel coordinates `Point<Pixels>` into Neovim `(col, row)` and calls `nvim_input_mouse`:
   * Left/Right/Middle press, release, and drag.
   * Trackpad / mouse wheel scrolling with fractional accumulator.
 
