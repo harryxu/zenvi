@@ -18,3 +18,10 @@ parking_lot = "0.12"
 unicode-width = "0.2"
 resvg = "0.44"
 usvg = "0.44"
+
+# Enable optimizations for all third-party dependencies in debug mode
+# (GPUI, text shaping, font layout, and rendering libraries run at release speed,
+# while your own zenvi code compiles incrementally in ~1s with full debug info).
+[profile.dev.package."*"]
+opt-level = 3
+
