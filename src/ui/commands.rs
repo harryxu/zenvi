@@ -101,6 +101,7 @@ impl ZenviView {
                     Ok(new_session) => {
                         new_session.attach_ui(last_cols, last_rows);
                         new_session.send_command("set mouse=a");
+                        new_session.send_command("set title");
 
                         if let Some(ref dir) = current_cwd {
                             new_session.send_command(&format!("cd {}", dir.display()));

@@ -91,6 +91,7 @@ impl ZenviView {
         // Initial attach with 100x35
         session.attach_ui(100, 35);
         session.send_command("set mouse=a");
+        session.send_command("set title");
         session.send_command(&format!(
             r#"lua (function()
                 if not vim.o.guifont or vim.o.guifont == "" then
