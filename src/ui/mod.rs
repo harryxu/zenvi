@@ -251,21 +251,7 @@ impl ZenviView {
 
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Sync font settings from Neovim state
-        let (guifont_changed, new_guifont, new_linespace) = {
-            let state = self.session.state.read();
-            if state.guifont != self.last_guifont || state.linespace != self.last_linespace {
-                (true, state.guifont.clone(), state.linespace)
-            } else {
-                (false, String::new(), 0)
-            }
-        };
-
-        if guifont_changed {
-            self.last_guifont = new_guifont.clone();
-            self.last_linespace = new_linespace;
-            self.update_font(&new_guifont, new_linespace, cx);
-        }
+        self.sync_font_if_changed(cx);
 
         // Read Neovim state for rendering
         let state = self.session.state.read();
