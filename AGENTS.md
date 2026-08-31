@@ -109,16 +109,8 @@ ls -lh target/debug/zenvi
 
 When extending Zenvi, follow these best practices:
 
-1. **Do Not Block the UI Thread:** All RPC I/O and process management must remain on Tokio background tasks. Only pass lightweight notify signals (`NvimEvent`) to GPUI views.
-2. **Preserve LineGrid Alignment:** Monospace alignment is critical. When modifying `grid.rs` or font metrics, ensure `char_width` and `line_height` calculations stay synchronized with `pos_to_grid` and `try_resize`.
-3. **Handle macOS Window Titlebar Gracefully:** When adjusting top padding or adding toolbar elements, never remove the `78px` left margin required by macOS traffic light buttons unless custom frame rendering is explicitly configured.
-4. **Prefer Direct Neovim RPC Commands:** When implementing UI actions (e.g., file open, buffer close, cd), invoke `session.send_command(...)` or `session.send_input(...)`.
-
----
-
-## 6. Roadmap / Recommended Next Enhancements
-
-* [ ] **Multigrid Support (`ext_multigrid`):** Render floating windows (LSP hover, Telescope, autocomplete) as separate GPUI layers with native drop shadows and rounded corners.
-* [ ] **Smooth Cursor Animation:** Add spring-based pixel interpolation for cursor movement between cells.
-* [x] **Font Configuration:** Native `guifont` & `linespace` option parsing (`vim.opt.guifont = "..."`), with `vim.g.zenvi` / `vim.g.gui_running` flags.
-* [ ] **Native Popup Menu (`ext_popupmenu`):** Render completion menu as native GPUI popups.
+ - **Do Not Block the UI Thread:** All RPC I/O and process management must remain on Tokio background tasks. Only pass lightweight notify signals (`NvimEvent`) to GPUI views.
+ - **Preserve LineGrid Alignment:** Monospace alignment is critical. When modifying `grid.rs` or font metrics, ensure `char_width` and `line_height` calculations stay synchronized with `pos_to_grid` and `try_resize`.
+ - **Handle macOS Window Titlebar Gracefully:** When adjusting top padding or adding toolbar elements, never remove the `78px` left margin required by macOS traffic light buttons unless custom frame rendering is explicitly configured.
+ - **Prefer Direct Neovim RPC Commands:** When implementing UI actions (e.g., file open, buffer close, cd), invoke `session.send_command(...)` or `session.send_input(...)`.
+ - Do not make git commits on your own without being asked.
