@@ -140,9 +140,8 @@ pub fn edit_menu_items() -> Vec<MenuItem> {
 #[cfg(not(target_os = "macos"))]
 pub fn build_main_menu() -> Vec<MenuItem> {
     vec![
-        MenuItem::action("About Zenvi", "", |this, _window, cx| {
-            this.show_about(cx);
-        }),
+        MenuItem::submenu("File", file_menu_items()),
+        MenuItem::submenu("Edit", edit_menu_items()),
         MenuItem::separator(),
         MenuItem::action("Open Neovim Config", "Ctrl+Shift+,", |this, _window, cx| {
             let (config_dir, target_file) = crate::window::get_nvim_config_file();
@@ -155,8 +154,9 @@ pub fn build_main_menu() -> Vec<MenuItem> {
             this.install_cli(cx);
         }),
         MenuItem::separator(),
-        MenuItem::submenu("File", file_menu_items()),
-        MenuItem::submenu("Edit", edit_menu_items()),
+        MenuItem::action("About Zenvi", "", |this, _window, cx| {
+            this.show_about(cx);
+        }),
         MenuItem::separator(),
         MenuItem::action("Exit Zenvi", "Ctrl+Shift+Q", |_this, _window, cx| {
             cx.quit();
