@@ -19,6 +19,24 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
         }
     }
 
+    // Do not forward Linux/Windows system shortcuts (Ctrl+Shift+Key, Ctrl+Alt+O, Alt+F4) to Neovim
+    #[cfg(not(target_os = "macos"))]
+    {
+        if alt && (raw_key == "F4" || raw_key == "f4") {
+            return None;
+        }
+        if ctrl && alt && (raw_key == "o" || raw_key == "O") {
+            return None;
+        }
+        if ctrl && shift {
+            match raw_key {
+                "q" | "Q" | "w" | "W" | "o" | "O" | "r" | "R" | "n" | "N" | "," | "v" | "V"
+                | "c" | "C" | "x" | "X" | "a" | "A" | "z" | "Z" => return None,
+                _ => {}
+            }
+        }
+    }
+
     let key_lower = raw_key.to_lowercase();
     let key = key_lower.as_str();
 
@@ -208,6 +226,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn test_system_shortcuts_ignored() {
         assert_eq!(key_event_to_nvim(&make_event("q", false, false, false, true)), None);
         assert_eq!(key_event_to_nvim(&make_event("o", false, false, false, true)), None);
@@ -218,6 +237,21 @@ mod tests {
         assert_eq!(key_event_to_nvim(&make_event("c", false, false, false, true)), None);
         assert_eq!(key_event_to_nvim(&make_event("x", false, false, false, true)), None);
         assert!(key_event_to_nvim(&make_event("z", false, false, false, true)).is_none());
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn test_system_shortcuts_ignored() {
+        assert_eq!(key_event_to_nvim(&make_event("q", true, false, true, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("o", true, false, true, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("o", true, true, false, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("r", true, false, true, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("R", true, false, true, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("v", true, false, true, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("c", true, false, true, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("x", true, false, true, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("z", true, false, true, false)), None);
+        assert_eq!(key_event_to_nvim(&make_event("F4", false, true, false, false)), None);
     }
 
     #[test]
