@@ -302,12 +302,8 @@ impl Render for ZenviView {
         self.current_shadow_size = shadow_size.into();
         window.set_client_inset(shadow_size);
 
-        let title = if state.title.is_empty() {
-            "Zenvi"
-        } else {
-            &state.title
-        };
-        window.set_window_title(title);
+        let display_title = components::titlebar::format_title(&state.title);
+        window.set_window_title(&display_title);
 
         let default_grid = crate::nvim::state::Grid::new(1, 80, 24);
         let grid = state
