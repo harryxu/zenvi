@@ -104,6 +104,44 @@ impl NvimSession {
         cmd.arg("--cmd")
             .arg("let g:zenvi = v:true | let g:gui_running = 1 | set title | set ttimeout ttimeoutlen=10");
 
+        // Automatically restore filetype detection and syntax/treesitter highlighting
+        // when a session is restored (via auto-session, persistence.nvim, or native :source Session.vim).
+        // Neovim suppresses standard FileType autocommands while SessionLoad=1 during session sourcing,
+        // leaving restored buffers with an empty filetype ("") and without syntax highlighting.
+        cmd.arg("--cmd").arg(
+            r#"lua (function()
+                local function restore_buffer_filetypes()
+                    local function detect()
+                        for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+                            if vim.api.nvim_buf_is_loaded(buf) and vim.api.nvim_buf_get_name(buf) ~= "" then
+                                if vim.bo[buf].filetype == "" then
+                                    vim.api.nvim_buf_call(buf, function()
+                                        vim.cmd("filetype detect")
+                                        pcall(vim.treesitter.start, buf)
+                                    end)
+                                end
+                            end
+                        end
+                    end
+                    detect()
+                    vim.schedule(detect)
+                end
+
+                local group = vim.api.nvim_create_augroup("ZenviSessionAutoRestore", { clear = true })
+                vim.api.nvim_create_autocmd("SessionLoadPost", {
+                    group = group,
+                    desc = "Restore filetype and syntax highlighting on session load",
+                    callback = restore_buffer_filetypes,
+                })
+                vim.api.nvim_create_autocmd("User", {
+                    group = group,
+                    pattern = { "PersistenceLoadPost", "AutoSessionRestorePost", "PossessionPostLoad", "ResessionLoadPost" },
+                    desc = "Restore filetype and syntax highlighting on plugin session load",
+                    callback = restore_buffer_filetypes,
+                })
+            end)()"#,
+        );
+
         for target in &targets {
             cmd.arg(target);
         }
@@ -718,6 +756,85 @@ mod tests {
 
             session.kill();
             let _ = std::fs::remove_file(&test_lua);
+            let _ = std::fs::remove_dir(&test_dir);
+        });
+    }
+
+    #[test]
+    fn test_session_restore_highlight() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let test_dir = std::env::temp_dir().join(format!("zenvi_session_test_{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&test_dir);
+            let test_rs = test_dir.join("main.rs");
+            let _ = std::fs::write(&test_rs, "fn main() {\n    println!(\"Hello\");\n}\n");
+            let session_file = test_dir.join("Session.vim");
+
+            let session = NvimSession::spawn_with_options(
+                tx,
+                Some(test_dir.clone()),
+                Vec::new(),
+                true,
+            )
+            .expect("Failed to spawn nvim");
+            session.attach_ui(80, 24);
+
+            // Open test file and create session sequentially
+            session
+                .request("nvim_command", vec![Value::from(format!("edit {}", test_rs.display()))])
+                .await
+                .unwrap();
+            session
+                .request("nvim_command", vec![Value::from(format!("mksession! {}", session_file.display()))])
+                .await
+                .unwrap();
+            session
+                .request("nvim_command", vec![Value::from("%bwipeout!")])
+                .await
+                .unwrap();
+
+            // Source the session file, simulating session restore
+            session
+                .request("nvim_command", vec![Value::from(format!("source {}", session_file.display()))])
+                .await
+                .unwrap();
+
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            let res = session
+                .exec_lua(
+                    r#"
+                    local current_buf = vim.api.nvim_get_current_buf()
+                    local ft = vim.bo[current_buf].filetype
+                    local syn = vim.bo[current_buf].syntax
+                    return {
+                        buf = current_buf,
+                        name = vim.api.nvim_buf_get_name(current_buf),
+                        ft = ft,
+                        syn = syn,
+                    }
+                "#,
+                    vec![],
+                )
+                .await
+                .expect("Failed to run exec_lua");
+            println!("BUFFER INFO: {:?}", res);
+
+            // Assert that ft and syn are correctly restored to "rust"
+            let map = res.as_map().unwrap();
+            for (k, v) in map {
+                if k.as_str() == Some("ft") {
+                    assert_eq!(v.as_str(), Some("rust"));
+                }
+                if k.as_str() == Some("syn") {
+                    assert_eq!(v.as_str(), Some("rust"));
+                }
+            }
+
+            session.kill();
+            let _ = std::fs::remove_file(&test_rs);
+            let _ = std::fs::remove_file(&session_file);
             let _ = std::fs::remove_dir(&test_dir);
         });
     }
