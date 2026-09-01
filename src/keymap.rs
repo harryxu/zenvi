@@ -32,8 +32,6 @@ pub fn init_keymaps(cx: &mut App) {
 
     #[cfg(not(target_os = "macos"))]
     cx.bind_keys([
-        KeyBinding::new("ctrl-shift-q", Quit, None),
-        KeyBinding::new("alt-f4", Quit, None),
         KeyBinding::new("ctrl-shift-w", CloseBuffer, None),
         KeyBinding::new("ctrl-shift-W", CloseBuffer, None),
         KeyBinding::new("ctrl-shift-n", NewWindow, None),

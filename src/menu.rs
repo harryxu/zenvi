@@ -158,7 +158,7 @@ pub fn build_main_menu() -> Vec<MenuItem> {
             this.show_about(cx);
         }),
         MenuItem::separator(),
-        MenuItem::action("Exit Zenvi", "Ctrl+Shift+Q", |_this, _window, cx| {
+        MenuItem::action("Exit Zenvi", "", |_this, _window, cx| {
             cx.quit();
         }),
     ]
