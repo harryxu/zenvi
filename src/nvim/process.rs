@@ -102,7 +102,7 @@ impl NvimSession {
             cmd.arg("--clean");
         }
         cmd.arg("--cmd")
-            .arg("let g:zenvi = v:true | let g:gui_running = 1 | set ttimeout ttimeoutlen=10");
+            .arg("let g:zenvi = v:true | let g:gui_running = 1 | set title | set ttimeout ttimeoutlen=10");
 
         for target in &targets {
             cmd.arg(target);

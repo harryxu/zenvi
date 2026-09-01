@@ -182,6 +182,7 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, borderless
     };
 
     let mut window_options = WindowOptions::default();
+    window_options.app_id = Some("zenvi".to_string());
     window_options.window_bounds = Some(WindowBounds::Windowed(window_bounds));
     window_options.focus = true;
     window_options.show = true;
@@ -215,6 +216,7 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, borderless
 
     cx.open_window(window_options, |window, cx| {
         cx.activate(true);
+        window.set_app_id("zenvi");
 
         let window_handle = window.window_handle();
         let view = cx.new(|cx| {
