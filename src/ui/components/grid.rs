@@ -198,7 +198,6 @@ pub fn render_grid(
         .font_family(font_family.to_string())
         .text_size(font_size)
         .line_height(line_height)
-        .bg(rgb(default_bg))
         .children(row_elements)
         .child(cursor_element)
 }

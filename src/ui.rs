@@ -11,6 +11,7 @@ use crate::{
     SelectAll, Undo,
 };
 use font::resolve_default_font_family;
+use gpui::prelude::*;
 use gpui::*;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,9 +35,15 @@ pub struct ZenviView {
     pub last_guifont: String,
     pub last_linespace: i64,
     pub is_mouse_down: bool,
+    /// Last sent mouse grid coordinate, used to deduplicate drag events and prevent RPC queue congestion
+    pub last_mouse_pos: Option<(usize, usize)>,
     pub scroll_accum_y: f32,
     pub cwd: Option<PathBuf>,
     pub marked_text: Option<String>,
+    /// Whether the window is running in client-side decorations (borderless) mode.
+    pub borderless: bool,
+    /// The currently active window shadow inset (in pixels).
+    pub current_shadow_size: f32,
     #[cfg(not(target_os = "macos"))]
     pub is_menu_open: bool,
     #[cfg(not(target_os = "macos"))]
@@ -47,7 +54,7 @@ pub struct ZenviView {
 impl ZenviView {
     #[allow(dead_code)]
     pub fn new(window_handle: AnyWindowHandle, cx: &mut Context<Self>) -> Self {
-        Self::with_cwd_and_targets(window_handle, None, Vec::new(), cx)
+        Self::with_cwd_and_targets(window_handle, None, Vec::new(), false, cx)
     }
 
     #[allow(dead_code)]
@@ -56,13 +63,14 @@ impl ZenviView {
         cwd: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::with_cwd_and_targets(window_handle, cwd, Vec::new(), cx)
+        Self::with_cwd_and_targets(window_handle, cwd, Vec::new(), false, cx)
     }
 
     pub fn with_cwd_and_targets(
         window_handle: AnyWindowHandle,
         cwd: Option<PathBuf>,
         targets: Vec<PathBuf>,
+        borderless: bool,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
@@ -124,9 +132,12 @@ impl ZenviView {
             last_guifont: String::new(),
             last_linespace: 0,
             is_mouse_down: false,
+            last_mouse_pos: None,
             scroll_accum_y: 0.0,
             cwd,
             marked_text: None,
+            borderless,
+            current_shadow_size: 0.0,
             #[cfg(not(target_os = "macos"))]
             is_menu_open: false,
             #[cfg(not(target_os = "macos"))]
@@ -280,6 +291,16 @@ impl Render for ZenviView {
         // Read Neovim state for rendering
         let state = self.session.state.read();
         let default_bg = state.default_bg;
+        let style = components::style::derive_titlebar_style(state.default_bg, state.default_fg);
+
+        let is_maximized = window.is_maximized();
+        let shadow_size = if self.borderless && !is_maximized {
+            px(8.0)
+        } else {
+            px(0.0)
+        };
+        self.current_shadow_size = shadow_size.into();
+        window.set_client_inset(shadow_size);
 
         let title = if state.title.is_empty() {
             "Zenvi"
@@ -299,12 +320,15 @@ impl Render for ZenviView {
         let viewport = window.viewport_size();
         let window_w: f32 = viewport.width.into();
         let window_h: f32 = viewport.height.into();
+        let shadow_f32: f32 = shadow_size.into();
+        let content_w = (window_w - shadow_f32 * 2.0).max(100.0);
+        let content_h = (window_h - shadow_f32 * 2.0).max(100.0);
         let lh: f32 = self.line_height.into();
 
-        let cols = ((window_w - GRID_PADDING_LEFT) / self.char_width)
+        let cols = ((content_w - GRID_PADDING_LEFT) / self.char_width)
             .floor()
             .max(20.0) as usize;
-        let rows = ((window_h - TOP_OFFSET) / lh).floor().max(5.0) as usize;
+        let rows = ((content_h - TOP_OFFSET) / lh).floor().max(5.0) as usize;
 
         if cols != self.last_cols || rows != self.last_rows {
             self.last_cols = cols;
@@ -324,8 +348,13 @@ impl Render for ZenviView {
         let focus_handle = self.focus_handle.clone();
         let entity = cx.entity().clone();
 
-        // Build root element tree
-        let root = div()
+        #[cfg(target_os = "macos")]
+        let titlebar_element = components::titlebar::render_titlebar(&state, cx);
+        #[cfg(not(target_os = "macos"))]
+        let titlebar_element = components::titlebar::render_titlebar(&state, self.is_menu_open, self.borderless, window, cx);
+
+        // Build inner window element tree
+        let inner = div()
             .id("zenvi-root")
             .size_full()
             .relative()
@@ -335,9 +364,9 @@ impl Render for ZenviView {
             .track_focus(&self.focus_handle)
             .key_context("zenvi");
 
-        let root = Self::bind_actions(root, cx);
+        let inner = Self::bind_actions(inner, cx);
 
-        let root = root
+        let inner = inner
             // IME input handler canvas
             .child(
                 canvas(
@@ -370,16 +399,7 @@ impl Render for ZenviView {
                 if let Some(nvim_key) = key_event_to_nvim(event) {
                     this.session.send_input(&nvim_key);
                 }
-            }));
-
-        let root = Self::bind_mouse_handlers(root, cx);
-
-        #[cfg(target_os = "macos")]
-        let titlebar_element = components::titlebar::render_titlebar(&state, cx);
-        #[cfg(not(target_os = "macos"))]
-        let titlebar_element = components::titlebar::render_titlebar(&state, self.is_menu_open, cx);
-
-        let root = root
+            }))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
                 this.open_paths(paths.paths());
             }))
@@ -390,18 +410,196 @@ impl Render for ZenviView {
                     .w_full()
                     .pt(px(GRID_PADDING_TOP))
                     .pl(px(GRID_PADDING_LEFT))
+                    .pr(px(GRID_PADDING_LEFT))
+                    .pb(px(2.0))
                     .overflow_hidden()
+                    .when(self.borderless && !is_maximized, |d| {
+                        d.rounded_b(px(10.0))
+                    })
                     .child(grid_element),
             );
 
         #[cfg(not(target_os = "macos"))]
-        let root = if self.is_menu_open {
-            root.child(crate::menu::render_app_menu(&state, self.active_submenu, cx))
+        let inner = if self.is_menu_open {
+            inner.child(crate::menu::render_app_menu(&state, self.active_submenu, cx))
         } else {
-            root
+            inner
         };
 
-        root
+        let inner = Self::bind_mouse_handlers(inner, cx);
+
+        if self.borderless && !is_maximized {
+            div()
+                .id("zenvi-window-container")
+                .size_full()
+                .relative()
+                .p(shadow_size)
+                // Top edge resize handle
+                .child(
+                    div()
+                        .id("resize-handle-top")
+                        .absolute()
+                        .top_0()
+                        .left(shadow_size)
+                        .right(shadow_size)
+                        .h(shadow_size)
+                        .cursor(CursorStyle::ResizeUpDown)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::Top);
+                        })),
+                )
+                // Bottom edge resize handle
+                .child(
+                    div()
+                        .id("resize-handle-bottom")
+                        .absolute()
+                        .bottom_0()
+                        .left(shadow_size)
+                        .right(shadow_size)
+                        .h(shadow_size)
+                        .cursor(CursorStyle::ResizeUpDown)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::Bottom);
+                        })),
+                )
+                // Left edge resize handle
+                .child(
+                    div()
+                        .id("resize-handle-left")
+                        .absolute()
+                        .left_0()
+                        .top(shadow_size)
+                        .bottom(shadow_size)
+                        .w(shadow_size)
+                        .cursor(CursorStyle::ResizeLeftRight)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::Left);
+                        })),
+                )
+                // Right edge resize handle
+                .child(
+                    div()
+                        .id("resize-handle-right")
+                        .absolute()
+                        .right_0()
+                        .top(shadow_size)
+                        .bottom(shadow_size)
+                        .w(shadow_size)
+                        .cursor(CursorStyle::ResizeLeftRight)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::Right);
+                        })),
+                )
+                // Top-Left corner resize handle
+                .child(
+                    div()
+                        .id("resize-handle-top-left")
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size(shadow_size)
+                        .cursor(CursorStyle::ResizeUpLeftDownRight)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::TopLeft);
+                        })),
+                )
+                // Top-Right corner resize handle
+                .child(
+                    div()
+                        .id("resize-handle-top-right")
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .size(shadow_size)
+                        .cursor(CursorStyle::ResizeUpRightDownLeft)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::TopRight);
+                        })),
+                )
+                // Bottom-Left corner resize handle
+                .child(
+                    div()
+                        .id("resize-handle-bottom-left")
+                        .absolute()
+                        .bottom_0()
+                        .left_0()
+                        .size(shadow_size)
+                        .cursor(CursorStyle::ResizeUpRightDownLeft)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::BottomLeft);
+                        })),
+                )
+                // Bottom-Right corner resize handle
+                .child(
+                    div()
+                        .id("resize-handle-bottom-right")
+                        .absolute()
+                        .bottom_0()
+                        .right_0()
+                        .size(shadow_size)
+                        .cursor(CursorStyle::ResizeUpLeftDownRight)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::BottomRight);
+                        })),
+                )
+                .child(
+                    inner
+                        .rounded(px(10.0))
+                        .border_1()
+                        .border_color(style.border_color)
+                        .shadow(vec![
+                            // Ambient close contact contour shadow
+                            BoxShadow {
+                                color: Hsla {
+                                    h: 0.0,
+                                    s: 0.0,
+                                    l: 0.0,
+                                    a: 0.26,
+                                },
+                                blur_radius: px(2.0),
+                                spread_radius: px(0.0),
+                                offset: point(px(0.0), px(1.0)),
+                            },
+                            // Compact soft ambient shadow (matching Zed's subtle shadow)
+                            BoxShadow {
+                                color: Hsla {
+                                    h: 0.0,
+                                    s: 0.0,
+                                    l: 0.0,
+                                    a: 0.18,
+                                },
+                                blur_radius: px(4.5),
+                                spread_radius: px(0.0),
+                                offset: point(px(0.0), px(1.5)),
+                            },
+                            // Light soft feather edge
+                            BoxShadow {
+                                color: Hsla {
+                                    h: 0.0,
+                                    s: 0.0,
+                                    l: 0.0,
+                                    a: 0.12,
+                                },
+                                blur_radius: px(8.0),
+                                spread_radius: px(0.5),
+                                offset: point(px(0.0), px(2.0)),
+                            },
+                        ])
+                        .overflow_hidden(),
+                )
+        } else {
+            inner
+        }
     }
 }
+
+
 

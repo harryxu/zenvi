@@ -31,6 +31,23 @@ pub fn get_nvim_config_dir() -> PathBuf {
     PathBuf::from(".config/nvim")
 }
 
+pub fn get_nvim_config_file() -> (PathBuf, PathBuf) {
+    let config_dir = get_nvim_config_dir();
+    if !config_dir.exists() {
+        let _ = std::fs::create_dir_all(&config_dir);
+    }
+    let init_lua = config_dir.join("init.lua");
+    let init_vim = config_dir.join("init.vim");
+    let target_file = if init_lua.exists() {
+        init_lua
+    } else if init_vim.exists() {
+        init_vim
+    } else {
+        init_lua
+    };
+    (config_dir, target_file)
+}
+
 pub fn get_safe_default_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -55,6 +72,8 @@ pub fn get_safe_default_dir() -> Option<PathBuf> {
 pub struct CliLaunchConfig {
     pub cwd: Option<PathBuf>,
     pub targets: Vec<PathBuf>,
+    /// Remove OS-provided window decorations (border + titlebar). Linux only.
+    pub borderless: bool,
 }
 
 pub fn parse_cli_args<I, S>(args: I, current_dir: Option<PathBuf>) -> CliLaunchConfig
@@ -63,11 +82,16 @@ where
     S: AsRef<str>,
 {
     let mut targets = Vec::new();
+    let mut borderless = false;
 
     for arg in args {
         let s = arg.as_ref();
         if s.starts_with("-psn_") || s.is_empty() {
             // Ignore macOS Finder process serial number
+            continue;
+        }
+        if s == "--no-titlebar" || s == "-B" {
+            borderless = true;
             continue;
         }
         let p = PathBuf::from(s);
@@ -99,7 +123,7 @@ where
         get_safe_default_dir()
     };
 
-    CliLaunchConfig { cwd, targets }
+    CliLaunchConfig { cwd, targets, borderless }
 }
 
 pub fn resolve_cli_launch_config() -> CliLaunchConfig {
@@ -141,7 +165,7 @@ pub fn url_to_path(url_str: &str) -> Option<PathBuf> {
     }
 }
 
-pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, cx: &mut App) {
+pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, borderless: bool, cx: &mut App) {
     let window_size = Size::new(px(1080.0), px(720.0));
     let window_count = cx.windows().len();
     let offset = px((window_count as f32 % 10.0) * 28.0);
@@ -172,11 +196,21 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, cx: &mut A
     }
     #[cfg(not(target_os = "macos"))]
     {
-        window_options.titlebar = Some(TitlebarOptions {
-            title: Some("Zenvi".into()),
-            appears_transparent: false,
-            traffic_light_position: None,
-        });
+        if borderless {
+            // Client-side decorations: remove OS-provided border and titlebar.
+            // The custom-drawn titlebar in ui/components/titlebar.rs is retained for
+            // window title, menu button, window controls, and drag-to-move support.
+            window_options.titlebar = None;
+            window_options.window_decorations = Some(WindowDecorations::Client);
+            window_options.window_background = WindowBackgroundAppearance::Transparent;
+        } else {
+            window_options.titlebar = Some(TitlebarOptions {
+                title: Some("Zenvi".into()),
+                appears_transparent: false,
+                traffic_light_position: None,
+            });
+            window_options.window_background = WindowBackgroundAppearance::Opaque;
+        }
     }
 
     cx.open_window(window_options, |window, cx| {
@@ -184,7 +218,12 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, cx: &mut A
 
         let window_handle = window.window_handle();
         let view = cx.new(|cx| {
-            let view = ZenviView::with_cwd_and_targets(window_handle, cwd, targets, cx);
+            cx.observe_window_appearance(window, |_, window, _| {
+                window.refresh();
+            })
+            .detach();
+
+            let view = ZenviView::with_cwd_and_targets(window_handle, cwd, targets, borderless, cx);
             window.focus(&view.focus_handle);
             view
         });
@@ -196,7 +235,7 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, cx: &mut A
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_cli_args, url_to_path};
+    use super::{get_nvim_config_file, parse_cli_args, url_to_path};
     use std::path::PathBuf;
 
     #[test]
@@ -220,6 +259,27 @@ mod tests {
         assert_eq!(config.cwd, Some(cwd.clone()));
         assert_eq!(config.targets.len(), 1);
         assert_eq!(config.targets[0], cwd.join("."));
+        assert!(!config.borderless);
+    }
+
+    #[test]
+    fn test_parse_cli_args_borderless_flags() {
+        let cwd = PathBuf::from("/Users/test/workspace");
+        let config1 = parse_cli_args(vec!["--no-titlebar", "main.rs"], Some(cwd.clone()));
+        assert!(config1.borderless);
+        assert_eq!(config1.targets.len(), 1);
+
+        let config2 = parse_cli_args(vec!["-B", "src/lib.rs"], Some(cwd.clone()));
+        assert!(config2.borderless);
+        assert_eq!(config2.targets.len(), 1);
+    }
+
+    #[test]
+    fn test_get_nvim_config_file_returns_valid_path() {
+        let (config_dir, target_file) = get_nvim_config_file();
+        assert!(config_dir.is_absolute() || !config_dir.as_os_str().is_empty());
+        assert!(target_file.starts_with(&config_dir));
+        assert!(target_file.ends_with("init.lua") || target_file.ends_with("init.vim"));
     }
 
     #[test]

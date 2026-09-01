@@ -39,16 +39,12 @@ fn main() {
         });
 
         cx.on_action(|_: &NewWindow, cx: &mut App| {
-            window::open_zenvi_window(None, Vec::new(), cx);
+            window::open_zenvi_window(None, Vec::new(), false, cx);
         });
 
         cx.on_action(|_: &OpenConfig, cx: &mut App| {
-            let config_dir = window::get_nvim_config_dir();
-            if !config_dir.exists() {
-                let _ = std::fs::create_dir_all(&config_dir);
-            }
-            let init_lua = config_dir.join("init.lua");
-            window::open_zenvi_window(Some(config_dir), vec![init_lua], cx);
+            let (config_dir, target_file) = window::get_nvim_config_file();
+            window::open_zenvi_window(Some(config_dir), vec![target_file], false, cx);
         });
 
         cx.on_action(|_: &InstallCli, _cx: &mut App| {
@@ -93,7 +89,7 @@ fn main() {
                                 } else {
                                     paths[0].parent().map(|p| p.to_path_buf())
                                 };
-                                window::open_zenvi_window(cwd, paths, cx);
+                                window::open_zenvi_window(cwd, paths, false, cx);
                             }
                         });
                     }
@@ -104,7 +100,7 @@ fn main() {
 
         // Open initial window with parsed CLI arguments
         let launch_config = window::resolve_cli_launch_config();
-        window::open_zenvi_window(launch_config.cwd, launch_config.targets, cx);
+        window::open_zenvi_window(launch_config.cwd, launch_config.targets, launch_config.borderless, cx);
     });
 }
 

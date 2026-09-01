@@ -22,8 +22,8 @@ pub fn mods_to_nvim(mods: &Modifiers) -> String {
 impl ZenviView {
     /// Converts a pixel position to a Neovim grid `(col, row)` coordinate.
     pub fn pos_to_grid(&self, pos: Point<Pixels>) -> (usize, usize) {
-        let x: f32 = pos.x.into();
-        let y: f32 = pos.y.into();
+        let x: f32 = (pos.x - px(self.current_shadow_size)).into();
+        let y: f32 = (pos.y - px(self.current_shadow_size)).into();
         let lh: f32 = self.line_height.into();
 
         let col = ((x - GRID_PADDING_LEFT) / self.char_width)
@@ -52,10 +52,11 @@ impl ZenviView {
             self.active_submenu = None;
         }
         window.focus(&self.focus_handle);
+        let (col, row) = self.pos_to_grid(position);
         if button == "left" {
             self.is_mouse_down = true;
+            self.last_mouse_pos = Some((col, row));
         }
-        let (col, row) = self.pos_to_grid(position);
         let mods = mods_to_nvim(modifiers);
         self.session
             .send_mouse(button, "press", &mods, 0, row, col);
@@ -71,6 +72,7 @@ impl ZenviView {
     ) {
         if button == "left" {
             self.is_mouse_down = false;
+            self.last_mouse_pos = None;
         }
         let (col, row) = self.pos_to_grid(position);
         let mods = mods_to_nvim(modifiers);
@@ -82,9 +84,13 @@ impl ZenviView {
     pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent) {
         if self.is_mouse_down {
             let (col, row) = self.pos_to_grid(event.position);
-            let mods = mods_to_nvim(&event.modifiers);
-            self.session
-                .send_mouse("left", "drag", &mods, 0, row, col);
+            // Deduplicate: only send RPC drag event to Neovim when the grid cell changes
+            if self.last_mouse_pos != Some((col, row)) {
+                self.last_mouse_pos = Some((col, row));
+                let mods = mods_to_nvim(&event.modifiers);
+                self.session
+                    .send_mouse("left", "drag", &mods, 0, row, col);
+            }
         }
     }
 
