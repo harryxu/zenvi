@@ -295,7 +295,7 @@ impl Render for ZenviView {
 
         let is_maximized = window.is_maximized();
         let shadow_size = if self.borderless && !is_maximized {
-            px(20.0)
+            px(8.0)
         } else {
             px(0.0)
         };
@@ -410,6 +410,8 @@ impl Render for ZenviView {
                     .w_full()
                     .pt(px(GRID_PADDING_TOP))
                     .pl(px(GRID_PADDING_LEFT))
+                    .pr(px(GRID_PADDING_LEFT))
+                    .pb(px(2.0))
                     .overflow_hidden()
                     .when(self.borderless && !is_maximized, |d| {
                         d.rounded_b(px(10.0))
@@ -554,7 +556,19 @@ impl Render for ZenviView {
                         .border_1()
                         .border_color(style.border_color)
                         .shadow(vec![
-                            // Multi-octave continuous distribution to eliminate 4-tap shader step banding
+                            // Ambient close contact contour shadow
+                            BoxShadow {
+                                color: Hsla {
+                                    h: 0.0,
+                                    s: 0.0,
+                                    l: 0.0,
+                                    a: 0.26,
+                                },
+                                blur_radius: px(2.0),
+                                spread_radius: px(0.0),
+                                offset: point(px(0.0), px(1.0)),
+                            },
+                            // Compact soft ambient shadow (matching Zed's subtle shadow)
                             BoxShadow {
                                 color: Hsla {
                                     h: 0.0,
@@ -562,53 +576,21 @@ impl Render for ZenviView {
                                     l: 0.0,
                                     a: 0.18,
                                 },
-                                blur_radius: px(2.0),
+                                blur_radius: px(4.5),
                                 spread_radius: px(0.0),
-                                offset: point(px(0.0), px(1.0)),
+                                offset: point(px(0.0), px(1.5)),
                             },
+                            // Light soft feather edge
                             BoxShadow {
                                 color: Hsla {
                                     h: 0.0,
                                     s: 0.0,
                                     l: 0.0,
-                                    a: 0.14,
+                                    a: 0.12,
                                 },
-                                blur_radius: px(5.0),
-                                spread_radius: px(0.0),
+                                blur_radius: px(8.0),
+                                spread_radius: px(0.5),
                                 offset: point(px(0.0), px(2.0)),
-                            },
-                            BoxShadow {
-                                color: Hsla {
-                                    h: 0.0,
-                                    s: 0.0,
-                                    l: 0.0,
-                                    a: 0.10,
-                                },
-                                blur_radius: px(9.0),
-                                spread_radius: px(1.0),
-                                offset: point(px(0.0), px(4.0)),
-                            },
-                            BoxShadow {
-                                color: Hsla {
-                                    h: 0.0,
-                                    s: 0.0,
-                                    l: 0.0,
-                                    a: 0.08,
-                                },
-                                blur_radius: px(14.0),
-                                spread_radius: px(2.0),
-                                offset: point(px(0.0), px(6.0)),
-                            },
-                            BoxShadow {
-                                color: Hsla {
-                                    h: 0.0,
-                                    s: 0.0,
-                                    l: 0.0,
-                                    a: 0.05,
-                                },
-                                blur_radius: px(20.0),
-                                spread_radius: px(3.0),
-                                offset: point(px(0.0), px(8.0)),
                             },
                         ])
                         .overflow_hidden(),
