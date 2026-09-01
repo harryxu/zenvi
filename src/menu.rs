@@ -95,7 +95,7 @@ pub fn init_menus(cx: &mut App) {
 pub fn file_menu_items() -> Vec<MenuItem> {
     vec![
         MenuItem::action("New Window", "Ctrl+Shift+N", |this, _window, cx| {
-            crate::window::open_zenvi_window(this.cwd.clone(), Vec::new(), cx);
+            crate::window::open_zenvi_window(this.cwd.clone(), Vec::new(), false, cx);
         }),
         MenuItem::separator(),
         MenuItem::action("Open File...", "Ctrl+Shift+O", |this, _window, cx| {
@@ -149,7 +149,7 @@ pub fn build_main_menu() -> Vec<MenuItem> {
             if !config_dir.exists() {
                 let _ = std::fs::create_dir_all(&config_dir);
             }
-            crate::window::open_zenvi_window(Some(config_dir), Vec::new(), cx);
+            crate::window::open_zenvi_window(Some(config_dir), Vec::new(), false, cx);
         }),
         MenuItem::action("Reload Neovim", "Ctrl+Shift+R", |this, _window, cx| {
             this.reload_nvim(cx);

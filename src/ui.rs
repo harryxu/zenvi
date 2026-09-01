@@ -37,6 +37,10 @@ pub struct ZenviView {
     pub scroll_accum_y: f32,
     pub cwd: Option<PathBuf>,
     pub marked_text: Option<String>,
+    /// Whether the window is running in client-side decorations (borderless) mode.
+    pub borderless: bool,
+    /// The currently active window shadow inset (in pixels).
+    pub current_shadow_size: f32,
     #[cfg(not(target_os = "macos"))]
     pub is_menu_open: bool,
     #[cfg(not(target_os = "macos"))]
@@ -47,7 +51,7 @@ pub struct ZenviView {
 impl ZenviView {
     #[allow(dead_code)]
     pub fn new(window_handle: AnyWindowHandle, cx: &mut Context<Self>) -> Self {
-        Self::with_cwd_and_targets(window_handle, None, Vec::new(), cx)
+        Self::with_cwd_and_targets(window_handle, None, Vec::new(), false, cx)
     }
 
     #[allow(dead_code)]
@@ -56,13 +60,14 @@ impl ZenviView {
         cwd: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::with_cwd_and_targets(window_handle, cwd, Vec::new(), cx)
+        Self::with_cwd_and_targets(window_handle, cwd, Vec::new(), false, cx)
     }
 
     pub fn with_cwd_and_targets(
         window_handle: AnyWindowHandle,
         cwd: Option<PathBuf>,
         targets: Vec<PathBuf>,
+        borderless: bool,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
@@ -127,6 +132,8 @@ impl ZenviView {
             scroll_accum_y: 0.0,
             cwd,
             marked_text: None,
+            borderless,
+            current_shadow_size: 0.0,
             #[cfg(not(target_os = "macos"))]
             is_menu_open: false,
             #[cfg(not(target_os = "macos"))]
@@ -273,6 +280,30 @@ impl ZenviView {
     }
 }
 
+/// Determines which edge or corner of the window the mouse is hovering over for resizing.
+pub fn resize_edge(pos: Point<Pixels>, hit_size: Pixels, size: Size<Pixels>) -> Option<ResizeEdge> {
+    let edge = if pos.y < hit_size && pos.x < hit_size {
+        ResizeEdge::TopLeft
+    } else if pos.y < hit_size && pos.x > size.width - hit_size {
+        ResizeEdge::TopRight
+    } else if pos.y < hit_size {
+        ResizeEdge::Top
+    } else if pos.y > size.height - hit_size && pos.x < hit_size {
+        ResizeEdge::BottomLeft
+    } else if pos.y > size.height - hit_size && pos.x > size.width - hit_size {
+        ResizeEdge::BottomRight
+    } else if pos.y > size.height - hit_size {
+        ResizeEdge::Bottom
+    } else if pos.x < hit_size {
+        ResizeEdge::Left
+    } else if pos.x > size.width - hit_size {
+        ResizeEdge::Right
+    } else {
+        return None;
+    };
+    Some(edge)
+}
+
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_font_if_changed(cx);
@@ -280,6 +311,16 @@ impl Render for ZenviView {
         // Read Neovim state for rendering
         let state = self.session.state.read();
         let default_bg = state.default_bg;
+        let style = components::style::derive_titlebar_style(state.default_bg, state.default_fg);
+
+        let is_maximized = window.is_maximized();
+        let shadow_size = if self.borderless && !is_maximized {
+            px(10.0)
+        } else {
+            px(0.0)
+        };
+        self.current_shadow_size = shadow_size.into();
+        window.set_client_inset(shadow_size);
 
         let title = if state.title.is_empty() {
             "Zenvi"
@@ -299,12 +340,15 @@ impl Render for ZenviView {
         let viewport = window.viewport_size();
         let window_w: f32 = viewport.width.into();
         let window_h: f32 = viewport.height.into();
+        let shadow_f32: f32 = shadow_size.into();
+        let content_w = (window_w - shadow_f32 * 2.0).max(100.0);
+        let content_h = (window_h - shadow_f32 * 2.0).max(100.0);
         let lh: f32 = self.line_height.into();
 
-        let cols = ((window_w - GRID_PADDING_LEFT) / self.char_width)
+        let cols = ((content_w - GRID_PADDING_LEFT) / self.char_width)
             .floor()
             .max(20.0) as usize;
-        let rows = ((window_h - TOP_OFFSET) / lh).floor().max(5.0) as usize;
+        let rows = ((content_h - TOP_OFFSET) / lh).floor().max(5.0) as usize;
 
         if cols != self.last_cols || rows != self.last_rows {
             self.last_cols = cols;
@@ -324,8 +368,13 @@ impl Render for ZenviView {
         let focus_handle = self.focus_handle.clone();
         let entity = cx.entity().clone();
 
-        // Build root element tree
-        let root = div()
+        #[cfg(target_os = "macos")]
+        let titlebar_element = components::titlebar::render_titlebar(&state, cx);
+        #[cfg(not(target_os = "macos"))]
+        let titlebar_element = components::titlebar::render_titlebar(&state, self.is_menu_open, self.borderless, window, cx);
+
+        // Build inner window element tree
+        let inner = div()
             .id("zenvi-root")
             .size_full()
             .relative()
@@ -335,9 +384,9 @@ impl Render for ZenviView {
             .track_focus(&self.focus_handle)
             .key_context("zenvi");
 
-        let root = Self::bind_actions(root, cx);
+        let inner = Self::bind_actions(inner, cx);
 
-        let root = root
+        let inner = inner
             // IME input handler canvas
             .child(
                 canvas(
@@ -370,16 +419,7 @@ impl Render for ZenviView {
                 if let Some(nvim_key) = key_event_to_nvim(event) {
                     this.session.send_input(&nvim_key);
                 }
-            }));
-
-        let root = Self::bind_mouse_handlers(root, cx);
-
-        #[cfg(target_os = "macos")]
-        let titlebar_element = components::titlebar::render_titlebar(&state, cx);
-        #[cfg(not(target_os = "macos"))]
-        let titlebar_element = components::titlebar::render_titlebar(&state, self.is_menu_open, cx);
-
-        let root = root
+            }))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, _cx| {
                 this.open_paths(paths.paths());
             }))
@@ -395,13 +435,94 @@ impl Render for ZenviView {
             );
 
         #[cfg(not(target_os = "macos"))]
-        let root = if self.is_menu_open {
-            root.child(crate::menu::render_app_menu(&state, self.active_submenu, cx))
+        let inner = if self.is_menu_open {
+            inner.child(crate::menu::render_app_menu(&state, self.active_submenu, cx))
         } else {
-            root
+            inner
         };
 
-        root
+        let inner = Self::bind_mouse_handlers(inner, cx);
+
+        if self.borderless && !is_maximized {
+            let resize_hit_size = px(8.0).max(shadow_size);
+            div()
+                .id("zenvi-window-container")
+                .size_full()
+                .relative()
+                .bg(transparent_black())
+                .p(shadow_size)
+                // Canvas with hitbox to detect mouse edge and set cursor style
+                .child(
+                    canvas(
+                        |_bounds, window, _cx| {
+                            window.insert_hitbox(
+                                Bounds::new(
+                                    point(px(0.0), px(0.0)),
+                                    window.window_bounds().get_bounds().size,
+                                ),
+                                HitboxBehavior::Normal,
+                            )
+                        },
+                        move |_bounds, hitbox, window, _cx| {
+                            let mouse = window.mouse_position();
+                            let size = window.window_bounds().get_bounds().size;
+                            let Some(edge) = resize_edge(mouse, resize_hit_size, size) else {
+                                return;
+                            };
+                            window.set_cursor_style(
+                                match edge {
+                                    ResizeEdge::Top | ResizeEdge::Bottom => {
+                                        CursorStyle::ResizeUpDown
+                                    }
+                                    ResizeEdge::Left | ResizeEdge::Right => {
+                                        CursorStyle::ResizeLeftRight
+                                    }
+                                    ResizeEdge::TopLeft | ResizeEdge::BottomRight => {
+                                        CursorStyle::ResizeUpLeftDownRight
+                                    }
+                                    ResizeEdge::TopRight | ResizeEdge::BottomLeft => {
+                                        CursorStyle::ResizeUpRightDownLeft
+                                    }
+                                },
+                                &hitbox,
+                            );
+                        },
+                    )
+                    .size_full()
+                    .absolute(),
+                )
+                .on_mouse_move(|_e, window, _cx| window.refresh())
+                .on_mouse_down(MouseButton::Left, move |e, window, _cx| {
+                    let size = window.window_bounds().get_bounds().size;
+                    if let Some(edge) = resize_edge(e.position, resize_hit_size, size) {
+                        window.start_window_resize(edge);
+                    }
+                })
+                .child(
+                    inner
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(style.border_color)
+                        .shadow(vec![BoxShadow {
+                            color: Hsla {
+                                h: 0.0,
+                                s: 0.0,
+                                l: 0.0,
+                                a: 0.45,
+                            },
+                            blur_radius: shadow_size,
+                            spread_radius: px(0.0),
+                            offset: point(px(0.0), px(2.0)),
+                        }])
+                        .overflow_hidden()
+                        .on_mouse_move(|_e, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                )
+        } else {
+            inner
+        }
     }
 }
+
 

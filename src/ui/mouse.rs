@@ -22,8 +22,8 @@ pub fn mods_to_nvim(mods: &Modifiers) -> String {
 impl ZenviView {
     /// Converts a pixel position to a Neovim grid `(col, row)` coordinate.
     pub fn pos_to_grid(&self, pos: Point<Pixels>) -> (usize, usize) {
-        let x: f32 = pos.x.into();
-        let y: f32 = pos.y.into();
+        let x: f32 = (pos.x - px(self.current_shadow_size)).into();
+        let y: f32 = (pos.y - px(self.current_shadow_size)).into();
         let lh: f32 = self.line_height.into();
 
         let col = ((x - GRID_PADDING_LEFT) / self.char_width)
