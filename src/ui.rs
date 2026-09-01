@@ -411,6 +411,9 @@ impl Render for ZenviView {
                     .pt(px(GRID_PADDING_TOP))
                     .pl(px(GRID_PADDING_LEFT))
                     .overflow_hidden()
+                    .when(self.borderless && !is_maximized, |d| {
+                        d.rounded_b(px(10.0))
+                    })
                     .child(grid_element),
             );
 

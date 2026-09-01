@@ -191,6 +191,7 @@ pub fn render_titlebar(
             .items_center()
             .justify_center()
             .cursor_pointer()
+            .when(!is_maximized, |d| d.rounded_tr(px(10.0)))
             .hover(|s| s.bg(rgb(0xe81123)))
             .on_mouse_down(
                 MouseButton::Left,
@@ -232,6 +233,9 @@ pub fn render_titlebar(
         .bg(rgb(default_bg))
         .border_b_1()
         .border_color(style.border_color)
+        .when(borderless && !window.is_maximized(), |d| {
+            d.rounded_t(px(10.0))
+        })
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|_this, event: &MouseDownEvent, window, cx| {
