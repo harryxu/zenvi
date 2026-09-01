@@ -321,7 +321,8 @@ impl Render for ZenviView {
         let content_h = (window_h - shadow_f32 * 2.0).max(100.0);
         let lh: f32 = self.line_height.into();
 
-        let cols = ((content_w - GRID_PADDING_LEFT) / self.char_width)
+        let horizontal_padding = GRID_PADDING_LEFT * 2.0 + 4.0;
+        let cols = ((content_w - horizontal_padding) / self.char_width)
             .floor()
             .max(20.0) as usize;
         let rows = ((content_h - TOP_OFFSET) / lh).floor().max(5.0) as usize;
@@ -406,8 +407,6 @@ impl Render for ZenviView {
                     .w_full()
                     .pt(px(GRID_PADDING_TOP))
                     .pl(px(GRID_PADDING_LEFT))
-                    .pr(px(GRID_PADDING_LEFT))
-                    .pb(px(2.0))
                     .overflow_hidden()
                     .when(self.borderless && !is_maximized, |d| {
                         d.rounded_b(px(10.0))
