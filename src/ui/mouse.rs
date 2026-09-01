@@ -52,10 +52,11 @@ impl ZenviView {
             self.active_submenu = None;
         }
         window.focus(&self.focus_handle);
+        let (col, row) = self.pos_to_grid(position);
         if button == "left" {
             self.is_mouse_down = true;
+            self.last_mouse_pos = Some((col, row));
         }
-        let (col, row) = self.pos_to_grid(position);
         let mods = mods_to_nvim(modifiers);
         self.session
             .send_mouse(button, "press", &mods, 0, row, col);
@@ -71,6 +72,7 @@ impl ZenviView {
     ) {
         if button == "left" {
             self.is_mouse_down = false;
+            self.last_mouse_pos = None;
         }
         let (col, row) = self.pos_to_grid(position);
         let mods = mods_to_nvim(modifiers);
@@ -82,9 +84,13 @@ impl ZenviView {
     pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent) {
         if self.is_mouse_down {
             let (col, row) = self.pos_to_grid(event.position);
-            let mods = mods_to_nvim(&event.modifiers);
-            self.session
-                .send_mouse("left", "drag", &mods, 0, row, col);
+            // Deduplicate: only send RPC drag event to Neovim when the grid cell changes
+            if self.last_mouse_pos != Some((col, row)) {
+                self.last_mouse_pos = Some((col, row));
+                let mods = mods_to_nvim(&event.modifiers);
+                self.session
+                    .send_mouse("left", "drag", &mods, 0, row, col);
+            }
         }
     }
 

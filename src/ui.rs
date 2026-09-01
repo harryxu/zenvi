@@ -35,6 +35,8 @@ pub struct ZenviView {
     pub last_guifont: String,
     pub last_linespace: i64,
     pub is_mouse_down: bool,
+    /// Last sent mouse grid coordinate, used to deduplicate drag events and prevent RPC queue congestion
+    pub last_mouse_pos: Option<(usize, usize)>,
     pub scroll_accum_y: f32,
     pub cwd: Option<PathBuf>,
     pub marked_text: Option<String>,
@@ -130,6 +132,7 @@ impl ZenviView {
             last_guifont: String::new(),
             last_linespace: 0,
             is_mouse_down: false,
+            last_mouse_pos: None,
             scroll_accum_y: 0.0,
             cwd,
             marked_text: None,
@@ -281,30 +284,6 @@ impl ZenviView {
     }
 }
 
-/// Determines which edge or corner of the window the mouse is hovering over for resizing.
-pub fn resize_edge(pos: Point<Pixels>, hit_size: Pixels, size: Size<Pixels>) -> Option<ResizeEdge> {
-    let edge = if pos.y < hit_size && pos.x < hit_size {
-        ResizeEdge::TopLeft
-    } else if pos.y < hit_size && pos.x > size.width - hit_size {
-        ResizeEdge::TopRight
-    } else if pos.y < hit_size {
-        ResizeEdge::Top
-    } else if pos.y > size.height - hit_size && pos.x < hit_size {
-        ResizeEdge::BottomLeft
-    } else if pos.y > size.height - hit_size && pos.x > size.width - hit_size {
-        ResizeEdge::BottomRight
-    } else if pos.y > size.height - hit_size {
-        ResizeEdge::Bottom
-    } else if pos.x < hit_size {
-        ResizeEdge::Left
-    } else if pos.x > size.width - hit_size {
-        ResizeEdge::Right
-    } else {
-        return None;
-    };
-    Some(edge)
-}
-
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_font_if_changed(cx);
@@ -445,58 +424,127 @@ impl Render for ZenviView {
         let inner = Self::bind_mouse_handlers(inner, cx);
 
         if self.borderless && !is_maximized {
-            let resize_hit_size = px(8.0).max(shadow_size);
             div()
                 .id("zenvi-window-container")
                 .size_full()
                 .relative()
                 .p(shadow_size)
-                // Canvas with hitbox to detect mouse edge and set cursor style
+                // Top edge resize handle
                 .child(
-                    canvas(
-                        |_bounds, window, _cx| {
-                            window.insert_hitbox(
-                                Bounds::new(
-                                    point(px(0.0), px(0.0)),
-                                    window.window_bounds().get_bounds().size,
-                                ),
-                                HitboxBehavior::Normal,
-                            )
-                        },
-                        move |_bounds, hitbox, window, _cx| {
-                            let mouse = window.mouse_position();
-                            let size = window.window_bounds().get_bounds().size;
-                            let Some(edge) = resize_edge(mouse, resize_hit_size, size) else {
-                                return;
-                            };
-                            window.set_cursor_style(
-                                match edge {
-                                    ResizeEdge::Top | ResizeEdge::Bottom => {
-                                        CursorStyle::ResizeUpDown
-                                    }
-                                    ResizeEdge::Left | ResizeEdge::Right => {
-                                        CursorStyle::ResizeLeftRight
-                                    }
-                                    ResizeEdge::TopLeft | ResizeEdge::BottomRight => {
-                                        CursorStyle::ResizeUpLeftDownRight
-                                    }
-                                    ResizeEdge::TopRight | ResizeEdge::BottomLeft => {
-                                        CursorStyle::ResizeUpRightDownLeft
-                                    }
-                                },
-                                &hitbox,
-                            );
-                        },
-                    )
-                    .size_full()
-                    .absolute(),
+                    div()
+                        .id("resize-handle-top")
+                        .absolute()
+                        .top_0()
+                        .left(shadow_size)
+                        .right(shadow_size)
+                        .h(shadow_size)
+                        .cursor(CursorStyle::ResizeUpDown)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::Top);
+                        })),
                 )
-                .on_mouse_down(MouseButton::Left, move |e, window, _cx| {
-                    let size = window.window_bounds().get_bounds().size;
-                    if let Some(edge) = resize_edge(e.position, resize_hit_size, size) {
-                        window.start_window_resize(edge);
-                    }
-                })
+                // Bottom edge resize handle
+                .child(
+                    div()
+                        .id("resize-handle-bottom")
+                        .absolute()
+                        .bottom_0()
+                        .left(shadow_size)
+                        .right(shadow_size)
+                        .h(shadow_size)
+                        .cursor(CursorStyle::ResizeUpDown)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::Bottom);
+                        })),
+                )
+                // Left edge resize handle
+                .child(
+                    div()
+                        .id("resize-handle-left")
+                        .absolute()
+                        .left_0()
+                        .top(shadow_size)
+                        .bottom(shadow_size)
+                        .w(shadow_size)
+                        .cursor(CursorStyle::ResizeLeftRight)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::Left);
+                        })),
+                )
+                // Right edge resize handle
+                .child(
+                    div()
+                        .id("resize-handle-right")
+                        .absolute()
+                        .right_0()
+                        .top(shadow_size)
+                        .bottom(shadow_size)
+                        .w(shadow_size)
+                        .cursor(CursorStyle::ResizeLeftRight)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::Right);
+                        })),
+                )
+                // Top-Left corner resize handle
+                .child(
+                    div()
+                        .id("resize-handle-top-left")
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size(shadow_size)
+                        .cursor(CursorStyle::ResizeUpLeftDownRight)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::TopLeft);
+                        })),
+                )
+                // Top-Right corner resize handle
+                .child(
+                    div()
+                        .id("resize-handle-top-right")
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .size(shadow_size)
+                        .cursor(CursorStyle::ResizeUpRightDownLeft)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::TopRight);
+                        })),
+                )
+                // Bottom-Left corner resize handle
+                .child(
+                    div()
+                        .id("resize-handle-bottom-left")
+                        .absolute()
+                        .bottom_0()
+                        .left_0()
+                        .size(shadow_size)
+                        .cursor(CursorStyle::ResizeUpRightDownLeft)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::BottomLeft);
+                        })),
+                )
+                // Bottom-Right corner resize handle
+                .child(
+                    div()
+                        .id("resize-handle-bottom-right")
+                        .absolute()
+                        .bottom_0()
+                        .right_0()
+                        .size(shadow_size)
+                        .cursor(CursorStyle::ResizeUpLeftDownRight)
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.start_window_resize(ResizeEdge::BottomRight);
+                        })),
+                )
                 .child(
                     inner
                         .rounded(px(10.0))
@@ -560,10 +608,7 @@ impl Render for ZenviView {
                                 offset: point(px(0.0), px(8.0)),
                             },
                         ])
-                        .overflow_hidden()
-                        .on_mouse_move(|_e, _, cx| {
-                            cx.stop_propagation();
-                        }),
+                        .overflow_hidden(),
                 )
         } else {
             inner
