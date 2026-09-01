@@ -4,17 +4,25 @@ use crate::ui::{ZenviView, TITLEBAR_HEIGHT};
 use gpui::prelude::*;
 use gpui::*;
 
+/// Formats the raw Neovim title, preserving the active file path while branding the shell as Zenvi.
+pub fn format_title(raw_title: &str) -> String {
+    let t = raw_title.trim();
+    if t.is_empty() || t == "Nvim" || t == "nvim" || t == "NVIM" {
+        "Zenvi".to_string()
+    } else {
+        t.replace(" - NVIM", " - Zenvi")
+            .replace(" - Nvim", " - Zenvi")
+            .replace(" - nvim", " - Zenvi")
+    }
+}
+
 /// Builds the custom titlebar element directly from Neovim's state (macOS version).
 #[cfg(target_os = "macos")]
 pub fn render_titlebar(
     state: &NvimState,
     cx: &mut Context<ZenviView>,
 ) -> Stateful<Div> {
-    let title = if state.title.is_empty() {
-        "Zenvi"
-    } else {
-        &state.title
-    };
+    let title = format_title(&state.title);
     let style = derive_titlebar_style(state.default_bg, state.default_fg);
     let default_bg = state.default_bg;
 
@@ -28,7 +36,7 @@ pub fn render_titlebar(
                 .text_size(px(12.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(style.title_color)
-                .child(title.to_string()),
+                .child(title),
         );
 
     div()
@@ -66,11 +74,7 @@ pub fn render_titlebar(
     window: &Window,
     cx: &mut Context<ZenviView>,
 ) -> Stateful<Div> {
-    let title = if state.title.is_empty() {
-        "Zenvi"
-    } else {
-        &state.title
-    };
+    let title = format_title(&state.title);
     let style = derive_titlebar_style(state.default_bg, state.default_fg);
     let default_bg = state.default_bg;
 
@@ -195,9 +199,19 @@ pub fn render_titlebar(
             .hover(|s| s.bg(rgb(0xe81123)))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|_this, _, window, cx| {
+                cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();
-                    window.remove_window();
+                    this.session.send_command("qa");
+                    let window_handle = window.window_handle();
+                    cx.defer(move |cx| {
+                        if cx.windows().len() <= 1 {
+                            cx.quit();
+                        } else if cx.windows().contains(&window_handle) {
+                            let _ = window_handle.update(cx, |_, window, _cx| {
+                                window.remove_window();
+                            });
+                        }
+                    });
                 }),
             )
             .child(
@@ -261,5 +275,34 @@ pub fn render_titlebar(
         bar.window_control_area(WindowControlArea::Drag)
     } else {
         bar
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_title;
+
+    #[test]
+    fn test_format_title_empty_and_default() {
+        assert_eq!(format_title(""), "Zenvi");
+        assert_eq!(format_title("Nvim"), "Zenvi");
+        assert_eq!(format_title("nvim"), "Zenvi");
+        assert_eq!(format_title("NVIM"), "Zenvi");
+    }
+
+    #[test]
+    fn test_format_title_with_filepath() {
+        assert_eq!(
+            format_title("Cargo.toml (/home/user/dev) - NVIM"),
+            "Cargo.toml (/home/user/dev) - Zenvi"
+        );
+        assert_eq!(
+            format_title("src/main.rs [+] - Nvim"),
+            "src/main.rs [+] - Zenvi"
+        );
+        assert_eq!(
+            format_title("/etc/hosts"),
+            "/etc/hosts"
+        );
     }
 }

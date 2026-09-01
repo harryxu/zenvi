@@ -18,6 +18,7 @@ pub fn render_grid(
         font_size: font_size.into(),
         line_height: line_height.into(),
         color: rgb(default_fg).into(),
+        white_space: WhiteSpace::Nowrap,
         ..Default::default()
     };
 
@@ -123,6 +124,7 @@ pub fn render_grid(
             div()
                 .h(line_height)
                 .w_full()
+                .overflow_hidden()
                 .font_family(font_family.to_string())
                 .text_size(font_size)
                 .line_height(line_height)
