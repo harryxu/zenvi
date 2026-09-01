@@ -31,6 +31,23 @@ pub fn get_nvim_config_dir() -> PathBuf {
     PathBuf::from(".config/nvim")
 }
 
+pub fn get_nvim_config_file() -> (PathBuf, PathBuf) {
+    let config_dir = get_nvim_config_dir();
+    if !config_dir.exists() {
+        let _ = std::fs::create_dir_all(&config_dir);
+    }
+    let init_lua = config_dir.join("init.lua");
+    let init_vim = config_dir.join("init.vim");
+    let target_file = if init_lua.exists() {
+        init_lua
+    } else if init_vim.exists() {
+        init_vim
+    } else {
+        init_lua
+    };
+    (config_dir, target_file)
+}
+
 pub fn get_safe_default_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -218,7 +235,7 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, borderless
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_cli_args, url_to_path};
+    use super::{get_nvim_config_file, parse_cli_args, url_to_path};
     use std::path::PathBuf;
 
     #[test]
@@ -255,6 +272,14 @@ mod tests {
         let config2 = parse_cli_args(vec!["-B", "src/lib.rs"], Some(cwd.clone()));
         assert!(config2.borderless);
         assert_eq!(config2.targets.len(), 1);
+    }
+
+    #[test]
+    fn test_get_nvim_config_file_returns_valid_path() {
+        let (config_dir, target_file) = get_nvim_config_file();
+        assert!(config_dir.is_absolute() || !config_dir.as_os_str().is_empty());
+        assert!(target_file.starts_with(&config_dir));
+        assert!(target_file.ends_with("init.lua") || target_file.ends_with("init.vim"));
     }
 
     #[test]

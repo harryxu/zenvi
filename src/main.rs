@@ -43,12 +43,8 @@ fn main() {
         });
 
         cx.on_action(|_: &OpenConfig, cx: &mut App| {
-            let config_dir = window::get_nvim_config_dir();
-            if !config_dir.exists() {
-                let _ = std::fs::create_dir_all(&config_dir);
-            }
-            let init_lua = config_dir.join("init.lua");
-            window::open_zenvi_window(Some(config_dir), vec![init_lua], false, cx);
+            let (config_dir, target_file) = window::get_nvim_config_file();
+            window::open_zenvi_window(Some(config_dir), vec![target_file], false, cx);
         });
 
         cx.on_action(|_: &InstallCli, _cx: &mut App| {

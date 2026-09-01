@@ -95,7 +95,7 @@ pub fn init_menus(cx: &mut App) {
 pub fn file_menu_items() -> Vec<MenuItem> {
     vec![
         MenuItem::action("New Window", "Ctrl+Shift+N", |this, _window, cx| {
-            crate::window::open_zenvi_window(this.cwd.clone(), Vec::new(), false, cx);
+            crate::window::open_zenvi_window(this.cwd.clone(), Vec::new(), this.borderless, cx);
         }),
         MenuItem::separator(),
         MenuItem::action("Open File...", "Ctrl+Shift+O", |this, _window, cx| {
@@ -144,12 +144,9 @@ pub fn build_main_menu() -> Vec<MenuItem> {
             this.show_about(cx);
         }),
         MenuItem::separator(),
-        MenuItem::action("Open Neovim Config", "Ctrl+Shift+,", |_this, _window, cx| {
-            let config_dir = crate::window::get_nvim_config_dir();
-            if !config_dir.exists() {
-                let _ = std::fs::create_dir_all(&config_dir);
-            }
-            crate::window::open_zenvi_window(Some(config_dir), Vec::new(), false, cx);
+        MenuItem::action("Open Neovim Config", "Ctrl+Shift+,", |this, _window, cx| {
+            let (config_dir, target_file) = crate::window::get_nvim_config_file();
+            crate::window::open_zenvi_window(Some(config_dir), vec![target_file], this.borderless, cx);
         }),
         MenuItem::action("Reload Neovim", "Ctrl+Shift+R", |this, _window, cx| {
             this.reload_nvim(cx);
