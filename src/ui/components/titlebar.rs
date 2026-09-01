@@ -199,9 +199,19 @@ pub fn render_titlebar(
             .hover(|s| s.bg(rgb(0xe81123)))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|_this, _, window, cx| {
+                cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();
-                    window.remove_window();
+                    this.session.send_command("qa");
+                    let window_handle = window.window_handle();
+                    cx.defer(move |cx| {
+                        if cx.windows().len() <= 1 {
+                            cx.quit();
+                        } else if cx.windows().contains(&window_handle) {
+                            let _ = window_handle.update(cx, |_, window, _cx| {
+                                window.remove_window();
+                            });
+                        }
+                    });
                 }),
             )
             .child(
