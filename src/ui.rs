@@ -171,17 +171,27 @@ impl ZenviView {
                         }
                     }
 
+                    // Exit early if the view/window has already been dropped
+                    let Some(entity) = this.upgrade() else {
+                        break;
+                    };
+
                     if needs_redraw {
-                        let _ = this.update(&mut cx, |_this, cx| {
-                            cx.notify();
-                        });
+                        if entity
+                            .update(&mut cx, |_this, cx| {
+                                cx.notify();
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
 
                     if should_exit {
                         let _ = cx.update(|cx| {
                             if cx.windows().len() <= 1 {
                                 cx.quit();
-                            } else {
+                            } else if cx.windows().contains(&window_handle) {
                                 let _ = window_handle.update(cx, |_, window, _cx| {
                                     window.remove_window();
                                 });
