@@ -11,6 +11,7 @@ use crate::{
     SelectAll, Undo,
 };
 use font::resolve_default_font_family;
+use gpui::prelude::*;
 use gpui::*;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -315,7 +316,7 @@ impl Render for ZenviView {
 
         let is_maximized = window.is_maximized();
         let shadow_size = if self.borderless && !is_maximized {
-            px(10.0)
+            px(20.0)
         } else {
             px(0.0)
         };
@@ -449,7 +450,6 @@ impl Render for ZenviView {
                 .id("zenvi-window-container")
                 .size_full()
                 .relative()
-                .bg(transparent_black())
                 .p(shadow_size)
                 // Canvas with hitbox to detect mouse edge and set cursor style
                 .child(
@@ -491,7 +491,6 @@ impl Render for ZenviView {
                     .size_full()
                     .absolute(),
                 )
-                .on_mouse_move(|_e, window, _cx| window.refresh())
                 .on_mouse_down(MouseButton::Left, move |e, window, _cx| {
                     let size = window.window_bounds().get_bounds().size;
                     if let Some(edge) = resize_edge(e.position, resize_hit_size, size) {
@@ -500,20 +499,67 @@ impl Render for ZenviView {
                 })
                 .child(
                     inner
-                        .rounded(px(8.0))
+                        .rounded(px(10.0))
                         .border_1()
                         .border_color(style.border_color)
-                        .shadow(vec![BoxShadow {
-                            color: Hsla {
-                                h: 0.0,
-                                s: 0.0,
-                                l: 0.0,
-                                a: 0.45,
+                        .shadow(vec![
+                            // Multi-octave continuous distribution to eliminate 4-tap shader step banding
+                            BoxShadow {
+                                color: Hsla {
+                                    h: 0.0,
+                                    s: 0.0,
+                                    l: 0.0,
+                                    a: 0.18,
+                                },
+                                blur_radius: px(2.0),
+                                spread_radius: px(0.0),
+                                offset: point(px(0.0), px(1.0)),
                             },
-                            blur_radius: shadow_size,
-                            spread_radius: px(0.0),
-                            offset: point(px(0.0), px(2.0)),
-                        }])
+                            BoxShadow {
+                                color: Hsla {
+                                    h: 0.0,
+                                    s: 0.0,
+                                    l: 0.0,
+                                    a: 0.14,
+                                },
+                                blur_radius: px(5.0),
+                                spread_radius: px(0.0),
+                                offset: point(px(0.0), px(2.0)),
+                            },
+                            BoxShadow {
+                                color: Hsla {
+                                    h: 0.0,
+                                    s: 0.0,
+                                    l: 0.0,
+                                    a: 0.10,
+                                },
+                                blur_radius: px(9.0),
+                                spread_radius: px(1.0),
+                                offset: point(px(0.0), px(4.0)),
+                            },
+                            BoxShadow {
+                                color: Hsla {
+                                    h: 0.0,
+                                    s: 0.0,
+                                    l: 0.0,
+                                    a: 0.08,
+                                },
+                                blur_radius: px(14.0),
+                                spread_radius: px(2.0),
+                                offset: point(px(0.0), px(6.0)),
+                            },
+                            BoxShadow {
+                                color: Hsla {
+                                    h: 0.0,
+                                    s: 0.0,
+                                    l: 0.0,
+                                    a: 0.05,
+                                },
+                                blur_radius: px(20.0),
+                                spread_radius: px(3.0),
+                                offset: point(px(0.0), px(8.0)),
+                            },
+                        ])
                         .overflow_hidden()
                         .on_mouse_move(|_e, _, cx| {
                             cx.stop_propagation();
@@ -524,5 +570,6 @@ impl Render for ZenviView {
         }
     }
 }
+
 
 
