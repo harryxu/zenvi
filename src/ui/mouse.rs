@@ -95,6 +95,7 @@ impl ZenviView {
     /// Handles mouse drag when left button is held down.
     pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if !self.is_mouse_down {
+            eprintln!("[ZENVI_MOUSE] WARNING: handle_mouse_move invoked while is_mouse_down=false!");
             return;
         }
         let (col, row) = self.pos_to_grid(event.position);

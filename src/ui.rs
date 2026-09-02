@@ -193,6 +193,7 @@ impl ZenviView {
                     };
 
                     if needs_redraw {
+                        eprintln!("[ZENVI_FRAME] Neovim Redraw notification received");
                         if entity
                             .update(&mut cx, |_this, cx| {
                                 cx.notify();
@@ -320,6 +321,10 @@ impl ZenviView {
 
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        static RENDER_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let count = RENDER_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        eprintln!("[ZENVI_FRAME] ZenviView::render #{}", count);
+
         // Read Neovim state once for the entire render pass
         let session = Arc::clone(&self.session);
         let state = session.state.read();
