@@ -1,5 +1,9 @@
 .PHONY: \
-	macapp
+	macapp \
+	linux
 
 macapp:
-	./scripts/bundle_macos.sh
+	./packaging/macos/bundle_macos.sh
+
+linux:
+	./packaging/linux/bundle_linux.sh

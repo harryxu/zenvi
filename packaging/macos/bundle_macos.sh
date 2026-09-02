@@ -2,7 +2,7 @@
 set -e
 
 # Change directory to project root
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 echo "=== Building Zenvi Release Binary ==="
 cargo build --release
@@ -27,10 +27,10 @@ cp "target/release/zenvi" "${MACOS_DIR}/zenvi"
 chmod +x "${MACOS_DIR}/zenvi"
 
 # Copy Info.plist
-cp "assets/Info.plist" "${CONTENTS_DIR}/Info.plist"
+cp "packaging/macos/Info.plist" "${CONTENTS_DIR}/Info.plist"
 
 # Copy AppIcon.icns
-cp "assets/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+cp "packaging/macos/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
 
 echo "=== Ad-hoc Code Signing for macOS LaunchServices ==="
 # Remove any quarantine flags from locally built artifacts

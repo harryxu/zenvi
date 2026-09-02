@@ -27,15 +27,12 @@
 ├── Cargo.toml               # Dependencies (gpui, tokio, rmpv, unicode-width, resvg, usvg)
 ├── README.md                # End-user introduction and usage guide
 ├── AGENTS.md                # This developer/agent reference document
-├── zenvi-icon.svg           # Master vector icon source
-├── assets/                  # Application asset directory
-│   ├── icon.svg             # Standard icon SVG asset
-│   ├── icon_1024x1024.png   # Master high-res raster icon
-│   ├── AppIcon.icns         # Compiled macOS multi-resolution icon bundle
-│   ├── AppIcon.iconset/     # macOS iconset (16x16 to 512x512@2x)
-│   └── Info.plist           # macOS bundle metadata
-├── scripts/
-│   └── bundle_macos.sh      # macOS Zenvi.app standalone packaging script
+├── assets/                  # Runtime embedded assets & app icon source
+│   ├── zenvi-icon.svg       # Master app icon SVG asset
+│   └── icons/               # Runtime UI vector icons (menu.svg, etc.)
+├── packaging/               # Platform-specific packaging scripts, metadata & generated bundles
+│   ├── macos/               # macOS Info.plist, AppIcon.icns, bundle_macos.sh
+│   └── linux/               # Linux desktop entry, hicolor desktop icons, bundle_linux.sh
 └── src/
     ├── main.rs              # App entry point, GPUI Application lifecycle & Tokio runtime initialization
     ├── actions.rs           # Centralized GPUI Action definitions (Quit, OpenFile, OpenFolder, OpenConfig, etc.)
