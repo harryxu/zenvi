@@ -251,32 +251,6 @@ impl NvimSession {
                                                 for event in params {
                                                     if let Some(event_arr) = event.as_array() {
                                                         if handle_redraw_event(&mut s, event_arr) {
-                                                            static REDRAW_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                                                            static LAST_REDRAW_LOG: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::Mutex::new(None);
-                                                            static LAST_REDRAW_INSTANT: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::Mutex::new(None);
-
-                                                            let count = REDRAW_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                                                            let mut guard = LAST_REDRAW_LOG.lock();
-                                                            let now = std::time::Instant::now();
-                                                            if let Some(prev) = *guard {
-                                                                let elapsed = now.duration_since(prev);
-                                                                if elapsed >= std::time::Duration::from_millis(1000) {
-                                                                    eprintln!("[FPS_STAT] Neovim Redraw rate: {:.1} fps ({} frames in {:?})", 
-                                                                        count as f64 / elapsed.as_secs_f64(), count, elapsed);
-                                                                    REDRAW_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
-                                                                    *guard = Some(now);
-                                                                }
-                                                            } else {
-                                                                *guard = Some(now);
-                                                            }
-                                                            {
-                                                                let mut l_guard = LAST_REDRAW_INSTANT.lock();
-                                                                if let Some(prev) = *l_guard {
-                                                                    let dt = now.duration_since(prev);
-                                                                    eprintln!("[REDRAW_INTERVAL] dt = {:.2}ms", dt.as_secs_f64() * 1000.0);
-                                                                }
-                                                                *l_guard = Some(now);
-                                                            }
                                                             let _ = event_tx_clone.send(NvimEvent::Redraw);
                                                         }
                                                     }

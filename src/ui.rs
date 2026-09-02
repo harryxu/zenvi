@@ -55,6 +55,8 @@ pub struct ZenviView {
     pub(crate) _drag_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
     pub last_interaction_instant: Option<std::time::Instant>,
+    pub mouse_drag_in_flight: bool,
+    pub pending_mouse_drag: Option<(usize, usize, Modifiers)>,
     /// Persistent render cache for incremental grid rendering (dirty-row tracking).
     pub grid_cache: components::grid::GridRenderCache,
 }
@@ -156,6 +158,8 @@ impl ZenviView {
             _drag_task: None,
             _event_task: Some(event_task),
             last_interaction_instant: None,
+            mouse_drag_in_flight: false,
+            pending_mouse_drag: None,
             grid_cache: components::grid::GridRenderCache::new(),
         }
     }
@@ -178,6 +182,12 @@ impl ZenviView {
                             if entity
                                 .update(&mut cx, |this, cx| {
                                     this.last_interaction_instant = Some(std::time::Instant::now());
+                                    this.mouse_drag_in_flight = false;
+                                    if let Some((col, row, mods)) = this.pending_mouse_drag.take() {
+                                        this.mouse_drag_in_flight = true;
+                                        let mods_str = crate::ui::mouse::mods_to_nvim(&mods);
+                                        this.session.send_mouse("left", "drag", mods_str, 0, row, col);
+                                    }
                                     cx.notify();
                                 })
                                 .is_err()
@@ -307,34 +317,6 @@ impl ZenviView {
 
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        static RENDER_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        static LAST_RENDER_LOG: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::Mutex::new(None);
-        let count = RENDER_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-
-        let mut guard = LAST_RENDER_LOG.lock();
-        let now = std::time::Instant::now();
-        if let Some(prev) = *guard {
-            let elapsed = now.duration_since(prev);
-            if elapsed >= std::time::Duration::from_millis(1000) {
-                eprintln!("[FPS_STAT] GPUI View render rate: {:.1} fps ({} frames in {:?})",
-                    count as f64 / elapsed.as_secs_f64(), count, elapsed);
-                RENDER_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
-                *guard = Some(now);
-            }
-        } else {
-            *guard = Some(now);
-        }
-
-        static LAST_FRAME_INSTANT: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::Mutex::new(None);
-        {
-            let mut l_guard = LAST_FRAME_INSTANT.lock();
-            if let Some(prev) = *l_guard {
-                let dt = now.duration_since(prev);
-                eprintln!("[FRAME_INTERVAL] dt = {:.2}ms", dt.as_secs_f64() * 1000.0);
-            }
-            *l_guard = Some(now);
-        }
-
         // Active interaction animation loop (aligns with Neovide 60 FPS swapchain presentation):
         // While user is actively scrolling, dragging, or receiving redraws, pump frames at 60 FPS VSync.
         // Once interaction ceases for 250ms, automatically returns to 0 FPS silent idle.

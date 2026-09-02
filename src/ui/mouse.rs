@@ -83,12 +83,13 @@ impl ZenviView {
         if button == "left" {
             self.is_mouse_down = false;
             self.last_mouse_pos = None;
+            self.pending_mouse_drag = None;
+            self.mouse_drag_in_flight = false;
             self._drag_task = None;
             cx.notify(); // Re-render to detach on_mouse_move listener
         }
         let (col, row) = self.pos_to_grid(position);
         let mods = mods_to_nvim(modifiers);
-        eprintln!("[MOUSE_UP] button={}, row={}, col={}", button, row, col);
         self.session
             .send_mouse(button, "release", mods, 0, row, col);
     }
@@ -99,19 +100,18 @@ impl ZenviView {
             return;
         }
         let (col, row) = self.pos_to_grid(event.position);
-        let is_scrollbar_area = col >= self.last_cols.saturating_sub(2);
+        if self.last_mouse_pos == Some((col, row)) {
+            return;
+        }
+        self.last_mouse_pos = Some((col, row));
+        self.last_interaction_instant = Some(std::time::Instant::now());
 
-        // When dragging the scrollbar on the right border, only respond to vertical row changes
-        // to avoid flooding Neovim with redraws caused by horizontal mouse jitter (e.g. col 64 <-> 63)
-        let should_update = if is_scrollbar_area {
-            self.last_mouse_pos.map(|(_, r)| r) != Some(row)
+        if self.mouse_drag_in_flight {
+            // Buffer the latest position. When Neovim finishes the in-flight frame,
+            // the listener will immediately dispatch this latest position with zero queue delay.
+            self.pending_mouse_drag = Some((col, row, event.modifiers.clone()));
         } else {
-            self.last_mouse_pos != Some((col, row))
-        };
-
-        if should_update {
-            self.last_mouse_pos = Some((col, row));
-            self.last_interaction_instant = Some(std::time::Instant::now());
+            self.mouse_drag_in_flight = true;
             let mods = mods_to_nvim(&event.modifiers);
             self.session
                 .send_mouse("left", "drag", mods, 0, row, col);
@@ -154,9 +154,7 @@ impl ZenviView {
 
         if ticks != 0 {
             let dir = if ticks > 0 { "up" } else { "down" };
-            for _ in 0..ticks.abs() {
-                self.session.send_mouse("wheel", dir, mods, 0, row, col);
-            }
+            self.session.send_mouse("wheel", dir, mods, 0, row, col);
         }
     }
 }
