@@ -52,6 +52,9 @@ pub struct ZenviView {
     pub last_resize_instant: std::time::Instant,
     pub pending_resize: Option<(usize, usize)>,
     pub(crate) _resize_task: Option<Task<()>>,
+    pub last_mouse_drag_instant: std::time::Instant,
+    pub pending_mouse_drag: Option<(String, usize, usize)>,
+    pub(crate) _drag_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
 }
 
@@ -149,6 +152,9 @@ impl ZenviView {
             last_resize_instant: std::time::Instant::now(),
             pending_resize: None,
             _resize_task: None,
+            last_mouse_drag_instant: std::time::Instant::now(),
+            pending_mouse_drag: None,
+            _drag_task: None,
             _event_task: Some(event_task),
         }
     }
@@ -292,8 +298,8 @@ impl ZenviView {
                 this.handle_mouse_up("middle", event.position, &event.modifiers);
             }),
         )
-        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, _cx| {
-            this.handle_mouse_move(event);
+        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+            this.handle_mouse_move(event, cx);
         }))
         .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
             this.handle_scroll_wheel(event);

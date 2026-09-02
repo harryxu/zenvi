@@ -73,6 +73,8 @@ impl ZenviView {
         if button == "left" {
             self.is_mouse_down = false;
             self.last_mouse_pos = None;
+            self._drag_task = None;
+            self.pending_mouse_drag = None;
         }
         let (col, row) = self.pos_to_grid(position);
         let mods = mods_to_nvim(modifiers);
@@ -81,15 +83,44 @@ impl ZenviView {
     }
 
     /// Handles mouse drag when left button is held down.
-    pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent) {
+    pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if self.is_mouse_down {
             let (col, row) = self.pos_to_grid(event.position);
             // Deduplicate: only send RPC drag event to Neovim when the grid cell changes
             if self.last_mouse_pos != Some((col, row)) {
                 self.last_mouse_pos = Some((col, row));
                 let mods = mods_to_nvim(&event.modifiers);
-                self.session
-                    .send_mouse("left", "drag", &mods, 0, row, col);
+
+                let now = std::time::Instant::now();
+                let elapsed = now.duration_since(self.last_mouse_drag_instant);
+                // 8ms throttling (~125 drag updates/sec) prevents flooding Neovim with intermediate scrollbar jumps
+                if elapsed >= std::time::Duration::from_millis(8) {
+                    self.last_mouse_drag_instant = now;
+                    self.pending_mouse_drag = None;
+                    self.session
+                        .send_mouse("left", "drag", &mods, 0, row, col);
+                } else {
+                    self.pending_mouse_drag = Some((mods, row, col));
+                    let remaining = std::time::Duration::from_millis(8).saturating_sub(elapsed);
+                    self._drag_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                        let cx = cx.clone();
+                        async move {
+                            tokio::time::sleep(remaining).await;
+                            let _ = cx.update(|cx| {
+                                if let Some(entity) = this.upgrade() {
+                                    entity.update(cx, |this, _cx| {
+                                        if this.is_mouse_down {
+                                            if let Some((mods, r, c)) = this.pending_mouse_drag.take() {
+                                                this.last_mouse_drag_instant = std::time::Instant::now();
+                                                this.session.send_mouse("left", "drag", &mods, 0, r, c);
+                                            }
+                                        }
+                                    });
+                                }
+                            });
+                        }
+                    }));
+                }
             }
         }
     }

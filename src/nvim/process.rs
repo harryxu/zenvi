@@ -250,12 +250,11 @@ impl NvimSession {
                                                 let mut s = state_clone.write();
                                                 for event in params {
                                                     if let Some(event_arr) = event.as_array() {
-                                                        if handle_redraw_event(&mut s, event_arr) {
-                                                            has_redraw = true;
-                                                        }
+                                                        handle_redraw_event(&mut s, event_arr);
                                                     }
                                                 }
                                             }
+                                            has_redraw = true;
                                         }
                                     }
                                     RpcMessage::Response {
@@ -379,9 +378,7 @@ impl NvimSession {
     }
 
     pub fn send_input(&self, input: &str) {
-        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
-        let msg = RpcMessage::Request {
-            msgid: id,
+        let msg = RpcMessage::Notification {
             method: "nvim_input".to_string(),
             params: vec![Value::from(input)],
         };
@@ -389,9 +386,7 @@ impl NvimSession {
     }
 
     pub fn send_command(&self, cmd: &str) {
-        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
-        let msg = RpcMessage::Request {
-            msgid: id,
+        let msg = RpcMessage::Notification {
             method: "nvim_command".to_string(),
             params: vec![Value::from(cmd)],
         };
@@ -399,9 +394,7 @@ impl NvimSession {
     }
 
     pub fn paste(&self, data: &str) {
-        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
-        let msg = RpcMessage::Request {
-            msgid: id,
+        let msg = RpcMessage::Notification {
             method: "nvim_paste".to_string(),
             params: vec![
                 Value::from(data),
@@ -421,9 +414,7 @@ impl NvimSession {
         row: usize,
         col: usize,
     ) {
-        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
-        let msg = RpcMessage::Request {
-            msgid: id,
+        let msg = RpcMessage::Notification {
             method: "nvim_input_mouse".to_string(),
             params: vec![
                 Value::from(button),
@@ -438,9 +429,7 @@ impl NvimSession {
     }
 
     pub fn try_resize(&self, width: usize, height: usize) {
-        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
-        let msg = RpcMessage::Request {
-            msgid: id,
+        let msg = RpcMessage::Notification {
             method: "nvim_ui_try_resize".to_string(),
             params: vec![Value::from(width as u64), Value::from(height as u64)],
         };

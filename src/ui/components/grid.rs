@@ -49,11 +49,9 @@ pub fn render_grid(
         let visible_cells = &row[..=last_col];
         let mut line_text = String::with_capacity(visible_cells.len() * 2);
         let mut highlights: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
+        let mut current_override: Option<(usize, usize, HighlightStyle)> = None;
 
         for cell in visible_cells {
-            // In Neovim ext_linegrid, a double-width character occupies 2 cells:
-            // the first cell contains the character, and the second cell has width == 0 and text == "".
-            // Skip the second trailing cell so we don't insert an extra space.
             let text = cell.text_str();
             if cell.width == 0 && text.is_empty() {
                 continue;
@@ -67,59 +65,85 @@ pub fn render_grid(
             }
             let end_byte = line_text.len();
 
-            let attr = state.highlights.get(&cell.hl_id);
+            let override_style = if cell.hl_id == 0 {
+                None
+            } else if let Some(attr) = state.highlights.get(&cell.hl_id) {
+                let mut fg = attr.foreground.unwrap_or(default_fg);
+                let mut bg = attr.background.unwrap_or(default_bg);
+                if attr.reverse {
+                    std::mem::swap(&mut fg, &mut bg);
+                }
 
-            let mut fg = attr.and_then(|a| a.foreground).unwrap_or(default_fg);
-            let mut bg = attr.and_then(|a| a.background).unwrap_or(default_bg);
-            let reverse = attr.map(|a| a.reverse).unwrap_or(false);
-            let underline = attr.map(|a| a.underline).unwrap_or(false);
-            let bold = attr.map(|a| a.bold).unwrap_or(false);
-            let italic = attr.map(|a| a.italic).unwrap_or(false);
+                let is_non_default = fg != default_fg
+                    || bg != default_bg
+                    || attr.reverse
+                    || attr.bold
+                    || attr.italic
+                    || attr.underline
+                    || attr.undercurl;
 
-            if reverse {
-                std::mem::swap(&mut fg, &mut bg);
-            }
+                if is_non_default {
+                    let underline_style = if attr.underline || attr.undercurl {
+                        Some(UnderlineStyle {
+                            color: Some(rgb(fg).into()),
+                            thickness: px(1.0),
+                            wavy: attr.undercurl,
+                        })
+                    } else {
+                        None
+                    };
 
-            let underline_style = if underline {
-                Some(UnderlineStyle {
-                    color: Some(rgb(fg).into()),
-                    thickness: px(1.0),
-                    wavy: false,
-                })
+                    Some(HighlightStyle {
+                        color: if fg != default_fg {
+                            Some(rgb(fg).into())
+                        } else {
+                            None
+                        },
+                        background_color: if bg != default_bg {
+                            Some(rgb(bg).into())
+                        } else {
+                            None
+                        },
+                        font_weight: if attr.bold {
+                            Some(FontWeight::BOLD)
+                        } else {
+                            None
+                        },
+                        font_style: if attr.italic {
+                            Some(FontStyle::Italic)
+                        } else {
+                            None
+                        },
+                        underline: underline_style,
+                        ..Default::default()
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             };
 
-            let style = HighlightStyle {
-                color: Some(rgb(fg).into()),
-                background_color: if bg != default_bg {
-                    Some(rgb(bg).into())
+            if let Some(style) = override_style {
+                if let Some((s_start, s_end, ref s_style)) = current_override {
+                    if *s_style == style && s_end == start_byte {
+                        current_override = Some((s_start, end_byte, style));
+                    } else {
+                        highlights.push((s_start..s_end, s_style.clone()));
+                        current_override = Some((start_byte, end_byte, style));
+                    }
                 } else {
-                    None
-                },
-                font_weight: if bold {
-                    Some(FontWeight::BOLD)
-                } else {
-                    None
-                },
-                font_style: if italic {
-                    Some(FontStyle::Italic)
-                } else {
-                    None
-                },
-                underline: underline_style,
-                ..Default::default()
-            };
-
-            // Merge adjacent spans with identical highlight style
-            if let Some((last_range, last_style)) = highlights.last_mut() {
-                if *last_style == style && last_range.end == start_byte {
-                    last_range.end = end_byte;
-                    continue;
+                    current_override = Some((start_byte, end_byte, style));
+                }
+            } else {
+                if let Some((s_start, s_end, s_style)) = current_override.take() {
+                    highlights.push((s_start..s_end, s_style));
                 }
             }
+        }
 
-            highlights.push((start_byte..end_byte, style));
+        if let Some((s_start, s_end, s_style)) = current_override.take() {
+            highlights.push((s_start..s_end, s_style));
         }
 
         row_elements.push(
@@ -127,9 +151,6 @@ pub fn render_grid(
                 .h(line_height)
                 .w_full()
                 .overflow_hidden()
-                .font_family(font_family.to_string())
-                .text_size(font_size)
-                .line_height(line_height)
                 .child(StyledText::new(line_text).with_default_highlights(&default_style, highlights)),
         );
     }
