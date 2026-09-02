@@ -267,6 +267,9 @@ pub fn render_grid(
     }
 
     let mut row_elements = Vec::with_capacity(grid.height);
+    let start_t = std::time::Instant::now();
+    let mut dirty_count = 0;
+    let mut clean_count = 0;
 
     for (row_idx, row) in grid.rows().enumerate() {
         let grid_ver = grid.row_versions.get(row_idx).copied().unwrap_or(0);
@@ -275,11 +278,14 @@ pub fn render_grid(
 
         // Rebuild cached data only for dirty rows
         if is_dirty {
+            dirty_count += 1;
             let cached = build_cached_row(row, state, default_fg, default_bg);
             if row_idx < cache.rows.len() {
                 cache.rows[row_idx] = Some(cached);
                 cache.row_versions[row_idx] = grid_ver;
             }
+        } else {
+            clean_count += 1;
         }
 
         // Use cached data to build the element
@@ -303,6 +309,10 @@ pub fn render_grid(
         } else {
             row_elements.push(div().h(line_height).w_full());
         }
+    }
+
+    if dirty_count > 0 {
+        eprintln!("[GRID_STATS] dirty: {}, clean: {}, build_time: {:?}", dirty_count, clean_count, start_t.elapsed());
     }
 
     // Floating Cursor Overlay: Decoupled from line text layout to eliminate subpixel text jitter

@@ -173,6 +173,7 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) -> bool {
                     let rows = args[5].as_i64().unwrap_or(0);
 
                     if let Some(grid) = state.grids.get_mut(&grid_id) {
+                        eprintln!("[GRID_SCROLL] top={}, bot={}, left={}, right={}, rows={}, grid_w={}", top, bot, left, right, rows, grid.width);
                         grid.scroll(top, bot, left, right, rows);
                     }
                 }

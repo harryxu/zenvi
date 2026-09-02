@@ -66,6 +66,7 @@ impl ZenviView {
             cx.notify(); // Re-render to dynamically attach on_mouse_move listener
         }
         let mods = mods_to_nvim(modifiers);
+        eprintln!("[MOUSE_DOWN] button={}, row={}, col={}", button, row, col);
         self.session
             .send_mouse(button, "press", mods, 0, row, col);
     }
@@ -88,6 +89,7 @@ impl ZenviView {
         }
         let (col, row) = self.pos_to_grid(position);
         let mods = mods_to_nvim(modifiers);
+        eprintln!("[MOUSE_UP] button={}, row={}, col={}", button, row, col);
         self.session
             .send_mouse(button, "release", mods, 0, row, col);
     }
@@ -110,6 +112,7 @@ impl ZenviView {
             if elapsed >= std::time::Duration::from_millis(8) {
                 self.last_mouse_drag_instant = now;
                 self.pending_mouse_drag = None;
+                eprintln!("[MOUSE_DRAG] immediate send left drag at row={}, col={}", row, col);
                 self.session
                     .send_mouse("left", "drag", mods, 0, row, col);
             } else {
@@ -130,6 +133,7 @@ impl ZenviView {
                                         if this.is_mouse_down {
                                             if let Some((mods, r, c)) = this.pending_mouse_drag.take() {
                                                 this.last_mouse_drag_instant = std::time::Instant::now();
+                                                eprintln!("[MOUSE_DRAG] delayed send left drag at row={}, col={}", r, c);
                                                 this.session.send_mouse("left", "drag", mods, 0, r, c);
                                             }
                                         }
