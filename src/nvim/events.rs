@@ -93,7 +93,7 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) -> bool {
                             }
                         }
                     }
-                    state.highlights.insert(id, attr);
+                    state.set_highlight(id, attr);
                 }
             }
             "grid_line" => {
@@ -112,6 +112,7 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) -> bool {
                         }
 
                         let mut current_hl = 0;
+                        let row_slice = grid.row_mut(row);
                         for cell_val in cells {
                             if let Some(cell_info) = cell_val.as_array() {
                                 if cell_info.is_empty() {
@@ -128,10 +129,13 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) -> bool {
                                     1
                                 };
 
-                                let char_width = unicode_width::UnicodeWidthStr::width(text);
+                                let char_width: u8 = if text.len() == 1 && text.as_bytes()[0] >= 0x20 && text.as_bytes()[0] <= 0x7E {
+                                    1
+                                } else {
+                                    unicode_width::UnicodeWidthStr::width(text) as u8
+                                };
                                 let cell = Cell::new(text, current_hl, char_width);
 
-                                let row_slice = grid.row_mut(row);
                                 for _ in 0..repeat {
                                     if col_start < row_slice.len() {
                                         row_slice[col_start] = cell;
@@ -140,6 +144,7 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) -> bool {
                                 }
                             }
                         }
+                        grid.mark_row_dirty(row);
                     }
                 }
             }
@@ -151,8 +156,10 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) -> bool {
 
                     state.active_grid = grid_id;
                     if let Some(grid) = state.grids.get_mut(&grid_id) {
+                        grid.mark_row_dirty(grid.cursor_row); // old cursor row
                         grid.cursor_row = row;
                         grid.cursor_col = col;
+                        grid.mark_row_dirty(row); // new cursor row
                     }
                 }
             }
@@ -360,7 +367,7 @@ mod tests {
         ];
         handle_redraw_event(&mut state, &event);
 
-        let hl = state.highlights.get(&10).expect("Highlight 10 should exist");
+        let hl = state.get_highlight(10).expect("Highlight 10 should exist");
         assert_eq!(hl.foreground, Some(0x112233));
         assert_eq!(hl.background, Some(0x445566));
         assert_eq!(hl.special, Some(0x778899));

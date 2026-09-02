@@ -50,16 +50,18 @@ impl Default for SmallText {
 }
 
 /// A lightweight, copyable grid cell stored completely inline on the stack.
+/// Using `u8` for `width` (max value 2 for CJK) reduces struct size from 32 → 24 bytes,
+/// improving CPU cache locality during grid rendering and scrolling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub text: SmallText,
     pub hl_id: u32,
-    pub width: usize,
+    pub width: u8,
 }
 
 impl Cell {
     #[inline]
-    pub fn new(text: &str, hl_id: u32, width: usize) -> Self {
+    pub fn new(text: &str, hl_id: u32, width: u8) -> Self {
         Self {
             text: SmallText::from_str(text),
             hl_id,
@@ -78,7 +80,7 @@ impl Default for Cell {
         Self {
             text: SmallText::from_str(" "),
             hl_id: 0,
-            width: 1,
+            width: 1u8,
         }
     }
 }
@@ -107,6 +109,9 @@ pub struct Grid {
     pub cells: Vec<Cell>,
     pub cursor_row: usize,
     pub cursor_col: usize,
+    /// Per-row version counters for lock-free incremental rendering.
+    /// Incremented whenever a row is modified by grid_line, scroll, etc.
+    pub row_versions: Vec<u32>,
 }
 
 impl Grid {
@@ -120,6 +125,7 @@ impl Grid {
             cells,
             cursor_row: 0,
             cursor_col: 0,
+            row_versions: vec![1; height],
         }
     }
 
@@ -190,10 +196,31 @@ impl Grid {
         self.width = width;
         self.height = height;
         self.cells = new_cells;
+        self.row_versions = vec![1; height];
     }
 
     pub fn clear(&mut self) {
         self.cells.fill(Cell::default());
+        for v in &mut self.row_versions {
+            *v = v.wrapping_add(1);
+        }
+    }
+
+    /// Increments the version counter for a single row.
+    #[inline]
+    pub fn mark_row_dirty(&mut self, row: usize) {
+        if row < self.row_versions.len() {
+            self.row_versions[row] = self.row_versions[row].wrapping_add(1);
+        }
+    }
+
+    /// Increments the version counter for all rows.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn mark_all_dirty(&mut self) {
+        for v in &mut self.row_versions {
+            *v = v.wrapping_add(1);
+        }
     }
 
     pub fn scroll(&mut self, top: usize, bot: usize, left: usize, right: usize, rows: i64) {
@@ -286,6 +313,11 @@ impl Grid {
                 }
             }
         }
+
+        // Mark all rows in the scroll region as dirty
+        for r in top..bot {
+            self.mark_row_dirty(r);
+        }
     }
 }
 
@@ -319,7 +351,9 @@ pub struct NvimState {
     pub default_fg: u32,
     pub default_bg: u32,
     pub default_sp: u32,
-    pub highlights: HashMap<u32, HighlightAttr>,
+    /// Dense highlight attribute table indexed by hl_id. Neovim assigns
+    /// sequential integer IDs, so a Vec provides O(1) lookup without hashing.
+    pub highlights: Vec<HighlightAttr>,
     pub grids: HashMap<u64, Grid>,
     pub active_grid: u64,
     pub current_mode: String,
@@ -330,6 +364,27 @@ pub struct NvimState {
     pub linespace: i64,
 }
 
+impl NvimState {
+    /// Returns the highlight attributes for the given id, or None if out of bounds or id 0 (default).
+    #[inline]
+    pub fn get_highlight(&self, hl_id: u32) -> Option<&HighlightAttr> {
+        if hl_id == 0 {
+            return None;
+        }
+        self.highlights.get(hl_id as usize)
+    }
+
+    /// Inserts or updates highlight attributes at the given id, growing the vec as needed.
+    #[inline]
+    pub fn set_highlight(&mut self, hl_id: u32, attr: HighlightAttr) {
+        let idx = hl_id as usize;
+        if idx >= self.highlights.len() {
+            self.highlights.resize_with(idx + 1, HighlightAttr::default);
+        }
+        self.highlights[idx] = attr;
+    }
+}
+
 impl Default for NvimState {
     fn default() -> Self {
         let mut grids = HashMap::new();
@@ -338,7 +393,7 @@ impl Default for NvimState {
             default_fg: 0xcccccc,
             default_bg: 0x1e1e1e,
             default_sp: 0xff0000,
-            highlights: HashMap::new(),
+            highlights: Vec::with_capacity(256),
             grids,
             active_grid: 1,
             current_mode: "normal".to_string(),

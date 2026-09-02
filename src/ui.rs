@@ -53,9 +53,11 @@ pub struct ZenviView {
     pub pending_resize: Option<(usize, usize)>,
     pub(crate) _resize_task: Option<Task<()>>,
     pub last_mouse_drag_instant: std::time::Instant,
-    pub pending_mouse_drag: Option<(String, usize, usize)>,
+    pub pending_mouse_drag: Option<(&'static str, usize, usize)>,
     pub(crate) _drag_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
+    /// Persistent render cache for incremental grid rendering (dirty-row tracking).
+    pub grid_cache: components::grid::GridRenderCache,
 }
 
 impl ZenviView {
@@ -156,6 +158,7 @@ impl ZenviView {
             pending_mouse_drag: None,
             _drag_task: None,
             _event_task: Some(event_task),
+            grid_cache: components::grid::GridRenderCache::new(),
         }
     }
 
@@ -309,10 +312,11 @@ impl ZenviView {
 
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.sync_font_if_changed(cx);
+        // Read Neovim state once for the entire render pass
+        let session = Arc::clone(&self.session);
+        let state = session.state.read();
+        self.sync_font_from_state(&state.guifont, state.linespace, cx);
 
-        // Read Neovim state for rendering
-        let state = self.session.state.read();
         let default_bg = state.default_bg;
         let style = components::style::derive_titlebar_style(state.default_bg, state.default_fg);
 
@@ -395,13 +399,16 @@ impl Render for ZenviView {
             self.font_size,
             self.line_height,
             self.char_width,
+            &mut self.grid_cache,
         );
 
         let focus_handle = self.focus_handle.clone();
         let entity = cx.entity().clone();
 
         let titlebar_element = components::titlebar::render_titlebar(
-            &state,
+            &display_title,
+            &style,
+            default_bg,
             self.is_menu_open,
             self.borderless,
             window,

@@ -2,6 +2,185 @@ use crate::nvim::state::{Grid, NvimState};
 use gpui::*;
 use std::ops::Range;
 
+/// Cached row data for incremental rendering. When a row is not dirty,
+/// we reuse the cached text and highlights instead of re-processing all cells.
+#[derive(Clone)]
+pub struct CachedRow {
+    pub line_text: SharedString,
+    pub highlights: Vec<(Range<usize>, HighlightStyle)>,
+    pub is_empty: bool,
+}
+
+/// Persistent render cache that survives across frames.
+/// Only dirty rows (where grid.row_versions[i] != cache.row_versions[i]) are recomputed;
+/// clean rows reuse cached StyledText and highlight data.
+pub struct GridRenderCache {
+    pub rows: Vec<Option<CachedRow>>,
+    pub row_versions: Vec<u32>,
+    pub last_cursor_row: usize,
+    pub last_cursor_col: usize,
+}
+
+impl GridRenderCache {
+    pub fn new() -> Self {
+        Self {
+            rows: Vec::new(),
+            row_versions: Vec::new(),
+            last_cursor_row: usize::MAX,
+            last_cursor_col: usize::MAX,
+        }
+    }
+
+    /// Ensures the cache has enough slots for the given grid height.
+    fn ensure_capacity(&mut self, height: usize) {
+        if self.rows.len() != height {
+            self.rows.resize(height, None);
+            self.row_versions.resize(height, 0);
+        }
+    }
+}
+
+/// Builds cached row data from grid cells and highlight attributes.
+fn build_cached_row(
+    row: &[crate::nvim::state::Cell],
+    state: &NvimState,
+    default_fg: u32,
+    default_bg: u32,
+) -> CachedRow {
+    // Find the rightmost cell that has content or non-default styling
+    let last_content_col = row.iter().rposition(|cell| {
+        let s = cell.text_str();
+        if s != " " && !s.is_empty() {
+            return true;
+        }
+        // Fast-path: hl_id 0 is always default, skip lookup
+        if cell.hl_id == 0 {
+            return false;
+        }
+        if let Some(attr) = state.get_highlight(cell.hl_id) {
+            let bg = attr.background.unwrap_or(default_bg);
+            if bg != default_bg || attr.reverse || attr.underline || attr.undercurl {
+                return true;
+            }
+        }
+        false
+    });
+
+    let Some(last_col) = last_content_col else {
+        return CachedRow {
+            line_text: SharedString::default(),
+            highlights: Vec::new(),
+            is_empty: true,
+        };
+    };
+
+    let visible_cells = &row[..=last_col];
+    let mut line_text = String::with_capacity(visible_cells.len() * 2);
+    let mut highlights: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
+    let mut current_override: Option<(usize, usize, HighlightStyle)> = None;
+
+    for cell in visible_cells {
+        let text = cell.text_str();
+        if cell.width == 0 && text.is_empty() {
+            continue;
+        }
+
+        let start_byte = line_text.len();
+        if text.is_empty() {
+            line_text.push(' ');
+        } else {
+            line_text.push_str(text);
+        }
+        let end_byte = line_text.len();
+
+        let override_style = if cell.hl_id == 0 {
+            None
+        } else if let Some(attr) = state.get_highlight(cell.hl_id) {
+            let mut fg = attr.foreground.unwrap_or(default_fg);
+            let mut bg = attr.background.unwrap_or(default_bg);
+            if attr.reverse {
+                std::mem::swap(&mut fg, &mut bg);
+            }
+
+            let is_non_default = fg != default_fg
+                || bg != default_bg
+                || attr.reverse
+                || attr.bold
+                || attr.italic
+                || attr.underline
+                || attr.undercurl;
+
+            if is_non_default {
+                let underline_style = if attr.underline || attr.undercurl {
+                    Some(UnderlineStyle {
+                        color: Some(rgb(fg).into()),
+                        thickness: px(1.0),
+                        wavy: attr.undercurl,
+                    })
+                } else {
+                    None
+                };
+
+                Some(HighlightStyle {
+                    color: if fg != default_fg {
+                        Some(rgb(fg).into())
+                    } else {
+                        None
+                    },
+                    background_color: if bg != default_bg {
+                        Some(rgb(bg).into())
+                    } else {
+                        None
+                    },
+                    font_weight: if attr.bold {
+                        Some(FontWeight::BOLD)
+                    } else {
+                        None
+                    },
+                    font_style: if attr.italic {
+                        Some(FontStyle::Italic)
+                    } else {
+                        None
+                    },
+                    underline: underline_style,
+                    ..Default::default()
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(style) = override_style {
+            if let Some((s_start, s_end, ref s_style)) = current_override {
+                if *s_style == style && s_end == start_byte {
+                    current_override = Some((s_start, end_byte, style));
+                } else {
+                    highlights.push((s_start..s_end, s_style.clone()));
+                    current_override = Some((start_byte, end_byte, style));
+                }
+            } else {
+                current_override = Some((start_byte, end_byte, style));
+            }
+        } else {
+            if let Some((s_start, s_end, s_style)) = current_override.take() {
+                highlights.push((s_start..s_end, s_style));
+            }
+        }
+    }
+
+    if let Some((s_start, s_end, s_style)) = current_override.take() {
+        highlights.push((s_start..s_end, s_style));
+    }
+
+    CachedRow {
+        line_text: SharedString::from(line_text),
+        highlights,
+        is_empty: false,
+    }
+}
+
 pub fn render_grid(
     state: &NvimState,
     grid: &Grid,
@@ -9,6 +188,7 @@ pub fn render_grid(
     font_size: Pixels,
     line_height: Pixels,
     char_width: f32,
+    cache: &mut GridRenderCache,
 ) -> impl IntoElement {
     let default_fg = state.default_fg;
     let default_bg = state.default_bg;
@@ -22,137 +202,45 @@ pub fn render_grid(
         ..Default::default()
     };
 
+    cache.ensure_capacity(grid.height);
+
     let mut row_elements = Vec::with_capacity(grid.height);
 
-    for row in grid.rows() {
-        // Find the rightmost cell that has content or non-default styling
-        let last_content_col = row.iter().rposition(|cell| {
-            let s = cell.text_str();
-            if s != " " && !s.is_empty() {
-                return true;
-            }
-            if let Some(attr) = state.highlights.get(&cell.hl_id) {
-                let bg = attr.background.unwrap_or(default_bg);
-                if bg != default_bg || attr.reverse || attr.underline || attr.undercurl {
-                    return true;
-                }
-            }
-            false
-        });
+    for (row_idx, row) in grid.rows().enumerate() {
+        let grid_ver = grid.row_versions.get(row_idx).copied().unwrap_or(0);
+        let cache_ver = cache.row_versions.get(row_idx).copied().unwrap_or(0);
+        let is_dirty = grid_ver != cache_ver || cache.rows.get(row_idx).map_or(true, |c| c.is_none());
 
-        let Some(last_col) = last_content_col else {
-            // Entire line is empty with default background: zero text shaping required
+        // Rebuild cached data only for dirty rows
+        if is_dirty {
+            let cached = build_cached_row(row, state, default_fg, default_bg);
+            if row_idx < cache.rows.len() {
+                cache.rows[row_idx] = Some(cached);
+                cache.row_versions[row_idx] = grid_ver;
+            }
+        }
+
+        // Use cached data to build the element
+        let cached = cache.rows.get(row_idx).and_then(|c| c.as_ref());
+
+        if let Some(cached_row) = cached {
+            if cached_row.is_empty {
+                row_elements.push(div().h(line_height).w_full());
+            } else {
+                row_elements.push(
+                    div()
+                        .h(line_height)
+                        .w_full()
+                        .overflow_hidden()
+                        .child(
+                            StyledText::new(cached_row.line_text.clone())
+                                .with_default_highlights(&default_style, cached_row.highlights.clone()),
+                        ),
+                );
+            }
+        } else {
             row_elements.push(div().h(line_height).w_full());
-            continue;
-        };
-
-        let visible_cells = &row[..=last_col];
-        let mut line_text = String::with_capacity(visible_cells.len() * 2);
-        let mut highlights: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
-        let mut current_override: Option<(usize, usize, HighlightStyle)> = None;
-
-        for cell in visible_cells {
-            let text = cell.text_str();
-            if cell.width == 0 && text.is_empty() {
-                continue;
-            }
-
-            let start_byte = line_text.len();
-            if text.is_empty() {
-                line_text.push(' ');
-            } else {
-                line_text.push_str(text);
-            }
-            let end_byte = line_text.len();
-
-            let override_style = if cell.hl_id == 0 {
-                None
-            } else if let Some(attr) = state.highlights.get(&cell.hl_id) {
-                let mut fg = attr.foreground.unwrap_or(default_fg);
-                let mut bg = attr.background.unwrap_or(default_bg);
-                if attr.reverse {
-                    std::mem::swap(&mut fg, &mut bg);
-                }
-
-                let is_non_default = fg != default_fg
-                    || bg != default_bg
-                    || attr.reverse
-                    || attr.bold
-                    || attr.italic
-                    || attr.underline
-                    || attr.undercurl;
-
-                if is_non_default {
-                    let underline_style = if attr.underline || attr.undercurl {
-                        Some(UnderlineStyle {
-                            color: Some(rgb(fg).into()),
-                            thickness: px(1.0),
-                            wavy: attr.undercurl,
-                        })
-                    } else {
-                        None
-                    };
-
-                    Some(HighlightStyle {
-                        color: if fg != default_fg {
-                            Some(rgb(fg).into())
-                        } else {
-                            None
-                        },
-                        background_color: if bg != default_bg {
-                            Some(rgb(bg).into())
-                        } else {
-                            None
-                        },
-                        font_weight: if attr.bold {
-                            Some(FontWeight::BOLD)
-                        } else {
-                            None
-                        },
-                        font_style: if attr.italic {
-                            Some(FontStyle::Italic)
-                        } else {
-                            None
-                        },
-                        underline: underline_style,
-                        ..Default::default()
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            if let Some(style) = override_style {
-                if let Some((s_start, s_end, ref s_style)) = current_override {
-                    if *s_style == style && s_end == start_byte {
-                        current_override = Some((s_start, end_byte, style));
-                    } else {
-                        highlights.push((s_start..s_end, s_style.clone()));
-                        current_override = Some((start_byte, end_byte, style));
-                    }
-                } else {
-                    current_override = Some((start_byte, end_byte, style));
-                }
-            } else {
-                if let Some((s_start, s_end, s_style)) = current_override.take() {
-                    highlights.push((s_start..s_end, s_style));
-                }
-            }
         }
-
-        if let Some((s_start, s_end, s_style)) = current_override.take() {
-            highlights.push((s_start..s_end, s_style));
-        }
-
-        row_elements.push(
-            div()
-                .h(line_height)
-                .w_full()
-                .overflow_hidden()
-                .child(StyledText::new(line_text).with_default_highlights(&default_style, highlights)),
-        );
     }
 
     // Floating Cursor Overlay: Decoupled from line text layout to eliminate subpixel text jitter
@@ -178,10 +266,10 @@ pub fn render_grid(
     let cursor_cell_width = cell_under_cursor.map(|c| c.width.max(1)).unwrap_or(1);
     let cursor_w = char_width * cursor_cell_width as f32;
 
+    // Use mode_idx for O(1) lookup instead of linear search
     let cursor_shape = state
         .mode_info
-        .iter()
-        .find(|m| m.name.eq_ignore_ascii_case(&state.current_mode))
+        .get(state.current_mode_idx)
         .map(|m| m.cursor_shape.as_str())
         .unwrap_or("block");
 
@@ -218,6 +306,10 @@ pub fn render_grid(
                 .child(cursor_text.to_string())
         }
     };
+
+    // Track cursor position for dirty detection
+    cache.last_cursor_row = cursor_row;
+    cache.last_cursor_col = cursor_col;
 
     div()
         .relative()

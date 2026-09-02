@@ -198,8 +198,9 @@ impl NvimSession {
 
         // Background task to write to stdin
         let write_task = tokio::spawn(async move {
+            let mut buf = Vec::with_capacity(1024);
             while let Some(val) = rx.recv().await {
-                let mut buf = Vec::new();
+                buf.clear();
                 let _ = rmpv::encode::write_value(&mut buf, &val);
 
                 // Drain any additional pending values to batch multiple IPC messages in one write
@@ -220,9 +221,9 @@ impl NvimSession {
 
         // Background task to read from stdout
         let read_task = tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(stdout);
-            let mut buffer = Vec::new();
-            let mut temp_buf = [0u8; 8192];
+            let mut reader = stdout;
+            let mut buffer = Vec::with_capacity(65536);
+            let mut temp_buf = [0u8; 65536];
 
             loop {
                 match reader.read(&mut temp_buf).await {
@@ -238,7 +239,7 @@ impl NvimSession {
 
                         let mut cursor = std::io::Cursor::new(&buffer);
                         let mut last_pos = 0;
-                        let mut has_redraw = false;
+                        let mut has_flush = false;
 
                         while let Ok(val) = rmpv::decode::read_value(&mut cursor) {
                             last_pos = cursor.position() as usize;
@@ -250,11 +251,12 @@ impl NvimSession {
                                                 let mut s = state_clone.write();
                                                 for event in params {
                                                     if let Some(event_arr) = event.as_array() {
-                                                        handle_redraw_event(&mut s, event_arr);
+                                                        if handle_redraw_event(&mut s, event_arr) {
+                                                            has_flush = true;
+                                                        }
                                                     }
                                                 }
                                             }
-                                            has_redraw = true;
                                         }
                                     }
                                     RpcMessage::Response {
@@ -276,7 +278,8 @@ impl NvimSession {
                             }
                         }
 
-                        if has_redraw {
+                        // Only notify the UI when Neovim has sent a complete atomic frame (flush)
+                        if has_flush {
                             let _ = event_tx_clone.send(NvimEvent::Redraw);
                         }
 
@@ -337,7 +340,7 @@ impl NvimSession {
             params,
         };
         self.tx
-            .send(msg.to_value())
+            .send(msg.into_value())
             .map_err(|_| anyhow!("Failed to send RPC request"))?;
 
         match tokio::time::timeout(std::time::Duration::from_millis(600), rx).await {
@@ -374,7 +377,7 @@ impl NvimSession {
                 Value::Map(opts),
             ],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 
     pub fn send_input(&self, input: &str) {
@@ -382,7 +385,7 @@ impl NvimSession {
             method: "nvim_input".to_string(),
             params: vec![Value::from(input)],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 
     pub fn send_command(&self, cmd: &str) {
@@ -390,7 +393,7 @@ impl NvimSession {
             method: "nvim_command".to_string(),
             params: vec![Value::from(cmd)],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 
     pub fn paste(&self, data: &str) {
@@ -402,7 +405,7 @@ impl NvimSession {
                 Value::from(-1i64),
             ],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 
     pub fn send_mouse(
@@ -425,7 +428,7 @@ impl NvimSession {
                 Value::from(col as u64),
             ],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 
     pub fn try_resize(&self, width: usize, height: usize) {
@@ -433,7 +436,7 @@ impl NvimSession {
             method: "nvim_ui_try_resize".to_string(),
             params: vec![Value::from(width as u64), Value::from(height as u64)],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 }
 

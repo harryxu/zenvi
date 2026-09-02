@@ -1,22 +1,28 @@
 use super::{ZenviView, GRID_PADDING_LEFT, TOP_OFFSET};
 use gpui::*;
 
-/// Converts GPUI modifier flags to Neovim modifier string (e.g. "CS" for Ctrl+Shift).
-pub fn mods_to_nvim(mods: &Modifiers) -> String {
-    let mut s = String::new();
-    if mods.control {
-        s.push('C');
+/// Converts GPUI modifier flags to Neovim modifier string (e.g. "CS" for Ctrl+Shift)
+/// without any heap allocations.
+#[inline]
+pub fn mods_to_nvim(mods: &Modifiers) -> &'static str {
+    match (mods.control, mods.shift, mods.alt, mods.platform) {
+        (false, false, false, false) => "",
+        (true, false, false, false) => "C",
+        (false, true, false, false) => "S",
+        (false, false, true, false) => "M",
+        (false, false, false, true) => "D",
+        (true, true, false, false) => "CS",
+        (true, false, true, false) => "CM",
+        (true, false, false, true) => "CD",
+        (false, true, true, false) => "SM",
+        (false, true, false, true) => "SD",
+        (false, false, true, true) => "MD",
+        (true, true, true, false) => "CSM",
+        (true, true, false, true) => "CSD",
+        (true, false, true, true) => "CMD",
+        (false, true, true, true) => "SMD",
+        (true, true, true, true) => "CSMD",
     }
-    if mods.shift {
-        s.push('S');
-    }
-    if mods.alt {
-        s.push('A');
-    }
-    if mods.platform {
-        s.push('D');
-    }
-    s
 }
 
 impl ZenviView {
@@ -59,7 +65,7 @@ impl ZenviView {
         }
         let mods = mods_to_nvim(modifiers);
         self.session
-            .send_mouse(button, "press", &mods, 0, row, col);
+            .send_mouse(button, "press", mods, 0, row, col);
     }
 
     /// Handles mouse button release events for any button.
@@ -79,7 +85,7 @@ impl ZenviView {
         let (col, row) = self.pos_to_grid(position);
         let mods = mods_to_nvim(modifiers);
         self.session
-            .send_mouse(button, "release", &mods, 0, row, col);
+            .send_mouse(button, "release", mods, 0, row, col);
     }
 
     /// Handles mouse drag when left button is held down.
@@ -98,7 +104,7 @@ impl ZenviView {
                     self.last_mouse_drag_instant = now;
                     self.pending_mouse_drag = None;
                     self.session
-                        .send_mouse("left", "drag", &mods, 0, row, col);
+                        .send_mouse("left", "drag", mods, 0, row, col);
                 } else {
                     self.pending_mouse_drag = Some((mods, row, col));
                     let remaining = std::time::Duration::from_millis(8).saturating_sub(elapsed);
@@ -112,7 +118,7 @@ impl ZenviView {
                                         if this.is_mouse_down {
                                             if let Some((mods, r, c)) = this.pending_mouse_drag.take() {
                                                 this.last_mouse_drag_instant = std::time::Instant::now();
-                                                this.session.send_mouse("left", "drag", &mods, 0, r, c);
+                                                this.session.send_mouse("left", "drag", mods, 0, r, c);
                                             }
                                         }
                                     });
@@ -152,31 +158,31 @@ impl ZenviView {
                 self.scroll_accum_y = self.scroll_accum_y.clamp(-step * 2.0, step * 2.0);
 
                 if ticks > 0 {
-                    let count = (ticks as usize).min(5);
+                    let count = (ticks as usize).min(3);
                     for _ in 0..count {
                         self.session
-                            .send_mouse("wheel", "up", &mods, 0, row, col);
+                            .send_mouse("wheel", "up", mods, 0, row, col);
                     }
                 } else if ticks < 0 {
-                    let count = ((-ticks) as usize).min(5);
+                    let count = ((-ticks) as usize).min(3);
                     for _ in 0..count {
                         self.session
-                            .send_mouse("wheel", "down", &mods, 0, row, col);
+                            .send_mouse("wheel", "down", mods, 0, row, col);
                     }
                 }
             }
             ScrollDelta::Lines(l) => {
                 let lines = l.y;
-                let count = (lines.round().abs() as usize).min(5);
+                let count = (lines.round().abs() as usize).max(1).min(3);
                 if lines > 0.0 {
                     for _ in 0..count {
                         self.session
-                            .send_mouse("wheel", "up", &mods, 0, row, col);
+                            .send_mouse("wheel", "up", mods, 0, row, col);
                     }
                 } else if lines < 0.0 {
                     for _ in 0..count {
                         self.session
-                            .send_mouse("wheel", "down", &mods, 0, row, col);
+                            .send_mouse("wheel", "down", mods, 0, row, col);
                     }
                 }
             }
