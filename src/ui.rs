@@ -340,7 +340,9 @@ impl Render for ZenviView {
         // Once interaction ceases for 250ms, automatically returns to 0 FPS silent idle.
         if let Some(t) = self.last_interaction_instant {
             if t.elapsed() < std::time::Duration::from_millis(250) {
-                window.request_animation_frame();
+                cx.on_next_frame(window, |_this, _window, cx| {
+                    cx.notify();
+                });
             } else {
                 self.last_interaction_instant = None;
             }
