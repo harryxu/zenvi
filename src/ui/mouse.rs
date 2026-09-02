@@ -103,8 +103,17 @@ impl ZenviView {
             return;
         }
         let (col, row) = self.pos_to_grid(event.position);
-        // Deduplicate: only process when the grid cell changes
-        if self.last_mouse_pos != Some((col, row)) {
+        let is_scrollbar_area = col >= self.last_cols.saturating_sub(2);
+
+        // When dragging the scrollbar on the right border, only respond to vertical row changes
+        // to avoid flooding Neovim with redraws caused by horizontal mouse jitter (e.g. col 64 <-> 63)
+        let should_update = if is_scrollbar_area {
+            self.last_mouse_pos.map(|(_, r)| r) != Some(row)
+        } else {
+            self.last_mouse_pos != Some((col, row))
+        };
+
+        if should_update {
             self.last_mouse_pos = Some((col, row));
             let mods = mods_to_nvim(&event.modifiers);
 
@@ -114,16 +123,14 @@ impl ZenviView {
             // Backpressure: If a drag event is currently in flight to Neovim, do NOT send
             // intermediate coordinates! Store the latest coordinate in pending_mouse_drag.
             // As soon as Neovim finishes rendering this frame, the latest coordinate is sent.
-            // Safety timeout: If Neovim hasn't sent Redraw within 35ms, release in-flight flag.
-            if !self.mouse_drag_in_flight || elapsed >= std::time::Duration::from_millis(35) {
+            // Safety timeout: If Neovim hasn't sent Redraw within 30ms, release in-flight flag.
+            if !self.mouse_drag_in_flight || elapsed >= std::time::Duration::from_millis(30) {
                 self.mouse_drag_in_flight = true;
                 self.pending_mouse_drag = None;
                 self.last_mouse_drag_instant = now;
-                eprintln!("[MOUSE_DRAG] immediate send left drag at row={}, col={}", row, col);
                 self.session
                     .send_mouse("left", "drag", mods, 0, row, col);
             } else {
-                eprintln!("[MOUSE_DRAG] coalescing drag to row={}, col={} (in flight)", row, col);
                 self.pending_mouse_drag = Some((mods, row, col));
             }
         }
@@ -138,7 +145,9 @@ impl ZenviView {
         self.last_wheel_pos = (col, row);
 
         let lh_f32: f32 = self.line_height.into();
-        let step = (lh_f32 * 0.8).max(12.0);
+        // Calibrated step: 1 wheel notch (~100-120px) or swipe produces 1-2 ticks (~3-6 lines in Neovim),
+        // matching Neovide's exact scroll distance (~30 lines per flick instead of 90 lines).
+        let step = (lh_f32 * 2.4).max(45.0);
 
         let mut ticks = 0i32;
         match event.delta {
@@ -154,7 +163,7 @@ impl ZenviView {
                     self.scroll_accum_y += step;
                     ticks -= 1;
                 }
-                self.scroll_accum_y = self.scroll_accum_y.clamp(-step * 5.0, step * 5.0);
+                self.scroll_accum_y = self.scroll_accum_y.clamp(-step * 2.0, step * 2.0);
             }
             ScrollDelta::Lines(l) => {
                 let lines = l.y;
@@ -163,7 +172,8 @@ impl ZenviView {
         }
 
         if ticks != 0 {
-            self.pending_wheel_ticks = (self.pending_wheel_ticks + ticks).clamp(-20, 20);
+            // Clamp pending buffer to 4 ticks so rolling stops promptly without lingering inertia.
+            self.pending_wheel_ticks = (self.pending_wheel_ticks + ticks).clamp(-4, 4);
 
             if !self.wheel_scroll_in_flight {
                 let count = self.pending_wheel_ticks.abs().min(3);
