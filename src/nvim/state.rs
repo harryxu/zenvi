@@ -173,3 +173,220 @@ impl Default for NvimState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cell_default() {
+        let cell = Cell::default();
+        assert_eq!(cell.text, " ");
+        assert_eq!(cell.hl_id, 0);
+        assert_eq!(cell.width, 1);
+    }
+
+    #[test]
+    fn test_highlight_attr_default() {
+        let hl = HighlightAttr::default();
+        assert_eq!(hl.foreground, None);
+        assert_eq!(hl.background, None);
+        assert_eq!(hl.special, None);
+        assert!(!hl.bold);
+        assert!(!hl.italic);
+        assert!(!hl.reverse);
+        assert!(!hl.underline);
+        assert!(!hl.undercurl);
+        assert!(!hl.strikethrough);
+        assert_eq!(hl.blend, 0);
+    }
+
+    #[test]
+    fn test_mode_info_default() {
+        let mode = ModeInfo::default();
+        assert_eq!(mode.name, "normal");
+        assert_eq!(mode.cursor_shape, "block");
+        assert_eq!(mode.cell_percentage, 100);
+        assert_eq!(mode.hl_id, 0);
+    }
+
+    #[test]
+    fn test_nvim_state_default() {
+        let state = NvimState::default();
+        assert_eq!(state.default_bg, 0x1e1e1e);
+        assert_eq!(state.default_fg, 0xcccccc);
+        assert_eq!(state.current_mode, "normal");
+        assert_eq!(state.active_grid, 1);
+        assert!(state.grids.contains_key(&1));
+        let grid = state.grids.get(&1).unwrap();
+        assert_eq!(grid.width, 80);
+        assert_eq!(grid.height, 24);
+    }
+
+    #[test]
+    fn test_grid_new() {
+        let grid = Grid::new(2, 40, 10);
+        assert_eq!(grid.id, 2);
+        assert_eq!(grid.width, 40);
+        assert_eq!(grid.height, 10);
+        assert_eq!(grid.cells.len(), 10);
+        assert_eq!(grid.cells[0].len(), 40);
+        assert_eq!(grid.cursor_row, 0);
+        assert_eq!(grid.cursor_col, 0);
+    }
+
+    #[test]
+    fn test_grid_resize_expand_and_shrink() {
+        let mut grid = Grid::new(1, 3, 2);
+        grid.cells[0][0] = Cell {
+            text: "A".to_string(),
+            hl_id: 1,
+            width: 1,
+        };
+        grid.cells[1][2] = Cell {
+            text: "B".to_string(),
+            hl_id: 2,
+            width: 1,
+        };
+
+        // Expand
+        grid.resize(5, 4);
+        assert_eq!(grid.width, 5);
+        assert_eq!(grid.height, 4);
+        assert_eq!(grid.cells[0][0].text, "A");
+        assert_eq!(grid.cells[1][2].text, "B");
+        assert_eq!(grid.cells[3][4], Cell::default());
+
+        // Shrink
+        grid.resize(2, 1);
+        assert_eq!(grid.width, 2);
+        assert_eq!(grid.height, 1);
+        assert_eq!(grid.cells.len(), 1);
+        assert_eq!(grid.cells[0].len(), 2);
+        assert_eq!(grid.cells[0][0].text, "A");
+    }
+
+    #[test]
+    fn test_grid_clear() {
+        let mut grid = Grid::new(1, 2, 2);
+        grid.cells[0][0] = Cell {
+            text: "X".to_string(),
+            hl_id: 10,
+            width: 1,
+        };
+        grid.cells[1][1] = Cell {
+            text: "Y".to_string(),
+            hl_id: 20,
+            width: 1,
+        };
+
+        grid.clear();
+        assert_eq!(grid.cells[0][0], Cell::default());
+        assert_eq!(grid.cells[1][1], Cell::default());
+    }
+
+    #[test]
+    fn test_grid_scroll_up() {
+        let mut grid = Grid::new(1, 4, 4);
+        // Fill row 0 with '0', row 1 with '1', row 2 with '2', row 3 with '3'
+        for r in 0..4 {
+            for c in 0..4 {
+                grid.cells[r][c] = Cell {
+                    text: r.to_string(),
+                    hl_id: 0,
+                    width: 1,
+                };
+            }
+        }
+
+        // Scroll up by 1 row in region top=0, bot=4, left=0, right=4
+        grid.scroll(0, 4, 0, 4, 1);
+
+        // Row 0 should now have '1', Row 1 should have '2', Row 2 should have '3', Row 3 should be default
+        assert_eq!(grid.cells[0][0].text, "1");
+        assert_eq!(grid.cells[1][0].text, "2");
+        assert_eq!(grid.cells[2][0].text, "3");
+        assert_eq!(grid.cells[3][0], Cell::default());
+    }
+
+    #[test]
+    fn test_grid_scroll_down() {
+        let mut grid = Grid::new(1, 4, 4);
+        for r in 0..4 {
+            for c in 0..4 {
+                grid.cells[r][c] = Cell {
+                    text: r.to_string(),
+                    hl_id: 0,
+                    width: 1,
+                };
+            }
+        }
+
+        // Scroll down by 1 row (rows = -1) in region top=0, bot=4, left=0, right=4
+        grid.scroll(0, 4, 0, 4, -1);
+
+        // Row 0 should be default, Row 1 should have '0', Row 2 should have '1', Row 3 should have '2'
+        assert_eq!(grid.cells[0][0], Cell::default());
+        assert_eq!(grid.cells[1][0].text, "0");
+        assert_eq!(grid.cells[2][0].text, "1");
+        assert_eq!(grid.cells[3][0].text, "2");
+    }
+
+    #[test]
+    fn test_grid_scroll_partial_region() {
+        let mut grid = Grid::new(1, 4, 4);
+        for r in 0..4 {
+            for c in 0..4 {
+                grid.cells[r][c] = Cell {
+                    text: format!("{}{}", r, c),
+                    hl_id: 0,
+                    width: 1,
+                };
+            }
+        }
+
+        // Scroll up by 1 row in sub-box: top=1, bot=3, left=1, right=3
+        grid.scroll(1, 3, 1, 3, 1);
+
+        // Outside area should remain untouched
+        assert_eq!(grid.cells[0][0].text, "00");
+        assert_eq!(grid.cells[3][3].text, "33");
+        assert_eq!(grid.cells[1][0].text, "10");
+        assert_eq!(grid.cells[1][3].text, "13");
+
+        // Sub-box row 1 (cols 1..3) should now have previous row 2 content
+        assert_eq!(grid.cells[1][1].text, "21");
+        assert_eq!(grid.cells[1][2].text, "22");
+
+        // Sub-box row 2 (cols 1..3) should be default (cleared)
+        assert_eq!(grid.cells[2][1], Cell::default());
+        assert_eq!(grid.cells[2][2], Cell::default());
+    }
+
+    #[test]
+    fn test_grid_scroll_boundary_noop() {
+        let mut grid = Grid::new(1, 4, 4);
+        grid.cells[0][0] = Cell {
+            text: "A".to_string(),
+            hl_id: 0,
+            width: 1,
+        };
+
+        // rows == 0
+        grid.scroll(0, 4, 0, 4, 0);
+        assert_eq!(grid.cells[0][0].text, "A");
+
+        // top >= bot
+        grid.scroll(3, 2, 0, 4, 1);
+        assert_eq!(grid.cells[0][0].text, "A");
+
+        // left >= right
+        grid.scroll(0, 4, 3, 2, 1);
+        assert_eq!(grid.cells[0][0].text, "A");
+
+        // Out-of-bounds coordinates handled gracefully without panic
+        grid.scroll(0, 100, 0, 100, 1);
+        // After scrolling 1 row up on 4x4, row 0 becomes row 1 (which was default)
+        assert_eq!(grid.cells[0][0], Cell::default());
+    }
+}

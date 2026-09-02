@@ -159,7 +159,7 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) {
                 }
             }
             "grid_scroll" => {
-                if args.len() >= 7 {
+                if args.len() >= 6 {
                     let grid_id = args[0].as_u64().unwrap_or(1);
                     let top = args[1].as_u64().unwrap_or(0) as usize;
                     let bot = args[2].as_u64().unwrap_or(0) as usize;
@@ -265,5 +265,314 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_handle_redraw_empty() {
+        let mut state = NvimState::default();
+        handle_redraw_event(&mut state, &[]);
+        assert_eq!(state.current_mode, "normal");
+
+        handle_redraw_event(&mut state, &[Value::from(123)]);
+        assert_eq!(state.current_mode, "normal");
+    }
+
+    #[test]
+    fn test_handle_grid_resize() {
+        let mut state = NvimState::default();
+
+        // Resize existing grid 1 to 100x40
+        let event = vec![
+            Value::from("grid_resize"),
+            Value::Array(vec![
+                Value::from(1u64),
+                Value::from(100u64),
+                Value::from(40u64),
+            ]),
+        ];
+        handle_redraw_event(&mut state, &event);
+
+        let grid1 = state.grids.get(&1).expect("Grid 1 should exist");
+        assert_eq!(grid1.width, 100);
+        assert_eq!(grid1.height, 40);
+
+        // Create new grid 2 of size 50x20
+        let event2 = vec![
+            Value::from("grid_resize"),
+            Value::Array(vec![
+                Value::from(2u64),
+                Value::from(50u64),
+                Value::from(20u64),
+            ]),
+        ];
+        handle_redraw_event(&mut state, &event2);
+
+        let grid2 = state.grids.get(&2).expect("Grid 2 should exist");
+        assert_eq!(grid2.width, 50);
+        assert_eq!(grid2.height, 20);
+    }
+
+    #[test]
+    fn test_handle_default_colors_set() {
+        let mut state = NvimState::default();
+        let event = vec![
+            Value::from("default_colors_set"),
+            Value::Array(vec![
+                Value::from(0xffffffi64),
+                Value::from(0x000000i64),
+                Value::from(0xff0000i64),
+            ]),
+        ];
+        handle_redraw_event(&mut state, &event);
+
+        assert_eq!(state.default_fg, 0xffffff);
+        assert_eq!(state.default_bg, 0x000000);
+        assert_eq!(state.default_sp, 0xff0000);
+    }
+
+    #[test]
+    fn test_handle_hl_attr_define() {
+        let mut state = NvimState::default();
+        let mut map = Vec::new();
+        map.push((Value::from("foreground"), Value::from(0x112233i64)));
+        map.push((Value::from("background"), Value::from(0x445566i64)));
+        map.push((Value::from("special"), Value::from(0x778899i64)));
+        map.push((Value::from("bold"), Value::from(true)));
+        map.push((Value::from("italic"), Value::from(true)));
+        map.push((Value::from("underline"), Value::from(true)));
+        map.push((Value::from("undercurl"), Value::from(true)));
+        map.push((Value::from("reverse"), Value::from(true)));
+        map.push((Value::from("strikethrough"), Value::from(true)));
+        map.push((Value::from("blend"), Value::from(50u64)));
+
+        let event = vec![
+            Value::from("hl_attr_define"),
+            Value::Array(vec![
+                Value::from(10u64),
+                Value::Map(map),
+                Value::Map(vec![]),
+                Value::Array(vec![]),
+            ]),
+        ];
+        handle_redraw_event(&mut state, &event);
+
+        let hl = state.highlights.get(&10).expect("Highlight 10 should exist");
+        assert_eq!(hl.foreground, Some(0x112233));
+        assert_eq!(hl.background, Some(0x445566));
+        assert_eq!(hl.special, Some(0x778899));
+        assert!(hl.bold);
+        assert!(hl.italic);
+        assert!(hl.underline);
+        assert!(hl.undercurl);
+        assert!(hl.reverse);
+        assert!(hl.strikethrough);
+        assert_eq!(hl.blend, 50);
+    }
+
+    #[test]
+    fn test_handle_grid_line_ascii_and_repeat() {
+        let mut state = NvimState::default();
+
+        let cells = vec![
+            // text, hl_id, repeat
+            Value::Array(vec![Value::from("A"), Value::from(5u64), Value::from(3u64)]),
+            Value::Array(vec![Value::from("B"), Value::from(6u64)]),
+        ];
+
+        let event = vec![
+            Value::from("grid_line"),
+            Value::Array(vec![
+                Value::from(1u64), // grid id
+                Value::from(0u64), // row
+                Value::from(0u64), // col_start
+                Value::Array(cells),
+            ]),
+        ];
+        handle_redraw_event(&mut state, &event);
+
+        let grid = state.grids.get(&1).unwrap();
+        // Cols 0, 1, 2 should be "A" with hl_id 5
+        for col in 0..3 {
+            assert_eq!(grid.cells[0][col].text, "A");
+            assert_eq!(grid.cells[0][col].hl_id, 5);
+            assert_eq!(grid.cells[0][col].width, 1);
+        }
+        // Col 3 should be "B" with hl_id 6
+        assert_eq!(grid.cells[0][3].text, "B");
+        assert_eq!(grid.cells[0][3].hl_id, 6);
+        assert_eq!(grid.cells[0][3].width, 1);
+    }
+
+    #[test]
+    fn test_handle_grid_line_cjk_double_width() {
+        let mut state = NvimState::default();
+
+        let cells = vec![
+            Value::Array(vec![Value::from("中"), Value::from(1u64)]),
+            Value::Array(vec![Value::from(""), Value::from(1u64)]),
+        ];
+
+        let event = vec![
+            Value::from("grid_line"),
+            Value::Array(vec![
+                Value::from(1u64),
+                Value::from(1u64), // row 1
+                Value::from(0u64), // col 0
+                Value::Array(cells),
+            ]),
+        ];
+        handle_redraw_event(&mut state, &event);
+
+        let grid = state.grids.get(&1).unwrap();
+        assert_eq!(grid.cells[1][0].text, "中");
+        assert_eq!(grid.cells[1][0].width, 2);
+        assert_eq!(grid.cells[1][1].text, "");
+        assert_eq!(grid.cells[1][1].width, 0);
+    }
+
+    #[test]
+    fn test_handle_grid_cursor_goto() {
+        let mut state = NvimState::default();
+        let event = vec![
+            Value::from("grid_cursor_goto"),
+            Value::Array(vec![
+                Value::from(1u64),
+                Value::from(15u64), // row
+                Value::from(30u64), // col
+            ]),
+        ];
+        handle_redraw_event(&mut state, &event);
+
+        assert_eq!(state.active_grid, 1);
+        let grid = state.grids.get(&1).unwrap();
+        assert_eq!(grid.cursor_row, 15);
+        assert_eq!(grid.cursor_col, 30);
+    }
+
+    #[test]
+    fn test_handle_grid_scroll() {
+        let mut state = NvimState::default();
+        if let Some(grid) = state.grids.get_mut(&1) {
+            grid.cells[0][0].text = "Top".to_string();
+            grid.cells[1][0].text = "Second".to_string();
+        }
+
+        let event = vec![
+            Value::from("grid_scroll"),
+            Value::Array(vec![
+                Value::from(1u64),
+                Value::from(0u64),  // top
+                Value::from(24u64), // bot
+                Value::from(0u64),  // left
+                Value::from(80u64), // right
+                Value::from(1i64),  // rows
+                Value::from(0i64),  // cols
+            ]),
+        ];
+        handle_redraw_event(&mut state, &event);
+
+        let grid = state.grids.get(&1).unwrap();
+        assert_eq!(grid.cells[0][0].text, "Second");
+    }
+
+    #[test]
+    fn test_handle_grid_clear_and_destroy() {
+        let mut state = NvimState::default();
+        if let Some(grid) = state.grids.get_mut(&1) {
+            grid.cells[0][0].text = "Hello".to_string();
+        }
+
+        // grid_clear
+        let clear_event = vec![
+            Value::from("grid_clear"),
+            Value::Array(vec![Value::from(1u64)]),
+        ];
+        handle_redraw_event(&mut state, &clear_event);
+        assert_eq!(state.grids.get(&1).unwrap().cells[0][0].text, " ");
+
+        // grid_destroy
+        let destroy_event = vec![
+            Value::from("grid_destroy"),
+            Value::Array(vec![Value::from(1u64)]),
+        ];
+        handle_redraw_event(&mut state, &destroy_event);
+        assert!(!state.grids.contains_key(&1));
+    }
+
+    #[test]
+    fn test_handle_mode_info_set_and_change() {
+        let mut state = NvimState::default();
+
+        let mut mode_normal = Vec::new();
+        mode_normal.push((Value::from("name"), Value::from("normal")));
+        mode_normal.push((Value::from("cursor_shape"), Value::from("block")));
+        mode_normal.push((Value::from("cell_percentage"), Value::from(100u64)));
+
+        let mut mode_insert = Vec::new();
+        mode_insert.push((Value::from("name"), Value::from("insert")));
+        mode_insert.push((Value::from("cursor_shape"), Value::from("vertical")));
+        mode_insert.push((Value::from("cell_percentage"), Value::from(25u64)));
+        mode_insert.push((Value::from("blinkon"), Value::from(500u64)));
+
+        let mode_info_event = vec![
+            Value::from("mode_info_set"),
+            Value::Array(vec![
+                Value::from(true),
+                Value::Array(vec![Value::Map(mode_normal), Value::Map(mode_insert)]),
+            ]),
+        ];
+        handle_redraw_event(&mut state, &mode_info_event);
+
+        assert_eq!(state.mode_info.len(), 2);
+        assert_eq!(state.mode_info[1].name, "insert");
+        assert_eq!(state.mode_info[1].cursor_shape, "vertical");
+        assert_eq!(state.mode_info[1].blinkon, 500);
+
+        // mode_change
+        let mode_change_event = vec![
+            Value::from("mode_change"),
+            Value::Array(vec![Value::from("insert"), Value::from(1u64)]),
+        ];
+        handle_redraw_event(&mut state, &mode_change_event);
+
+        assert_eq!(state.current_mode, "insert");
+        assert_eq!(state.current_mode_idx, 1);
+    }
+
+    #[test]
+    fn test_handle_title_and_options() {
+        let mut state = NvimState::default();
+
+        // set_title
+        let title_event = vec![
+            Value::from("set_title"),
+            Value::Array(vec![Value::from("Zenvi - main.rs")]),
+        ];
+        handle_redraw_event(&mut state, &title_event);
+        assert_eq!(state.title, "Zenvi - main.rs");
+
+        // option_set: guifont
+        let font_event = vec![
+            Value::from("option_set"),
+            Value::Array(vec![
+                Value::from("guifont"),
+                Value::from("JetBrainsMono Nerd Font:h15"),
+            ]),
+        ];
+        handle_redraw_event(&mut state, &font_event);
+        assert_eq!(state.guifont, "JetBrainsMono Nerd Font:h15");
+
+        // option_set: linespace
+        let linespace_event = vec![
+            Value::from("option_set"),
+            Value::Array(vec![Value::from("linespace"), Value::from(4i64)]),
+        ];
+        handle_redraw_event(&mut state, &linespace_event);
+        assert_eq!(state.linespace, 4);
     }
 }
