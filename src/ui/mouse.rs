@@ -99,32 +99,51 @@ impl ZenviView {
     pub fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent) {
         let (col, row) = self.pos_to_grid(event.position);
         let mods = mods_to_nvim(&event.modifiers);
+        let lh_f32: f32 = self.line_height.into();
+        let step = (lh_f32 * 0.8).max(12.0);
 
         match event.delta {
             ScrollDelta::Pixels(p) => {
                 let dy: f32 = p.y.into();
                 self.scroll_accum_y += dy;
-                let step = 15.0;
+
+                let mut ticks = 0i32;
                 while self.scroll_accum_y >= step {
                     self.scroll_accum_y -= step;
-                    self.session
-                        .send_mouse("wheel", "up", &mods, 0, row, col);
+                    ticks += 1;
                 }
                 while self.scroll_accum_y <= -step {
                     self.scroll_accum_y += step;
-                    self.session
-                        .send_mouse("wheel", "down", &mods, 0, row, col);
+                    ticks -= 1;
+                }
+
+                // Prevent unbounded accumulation on ultra-fast trackpad swipes
+                self.scroll_accum_y = self.scroll_accum_y.clamp(-step * 2.0, step * 2.0);
+
+                if ticks > 0 {
+                    let count = (ticks as usize).min(5);
+                    for _ in 0..count {
+                        self.session
+                            .send_mouse("wheel", "up", &mods, 0, row, col);
+                    }
+                } else if ticks < 0 {
+                    let count = ((-ticks) as usize).min(5);
+                    for _ in 0..count {
+                        self.session
+                            .send_mouse("wheel", "down", &mods, 0, row, col);
+                    }
                 }
             }
             ScrollDelta::Lines(l) => {
                 let lines = l.y;
+                let count = (lines.round().abs() as usize).min(5);
                 if lines > 0.0 {
-                    for _ in 0..(lines.round().abs() as usize) {
+                    for _ in 0..count {
                         self.session
                             .send_mouse("wheel", "up", &mods, 0, row, col);
                     }
                 } else if lines < 0.0 {
-                    for _ in 0..(lines.round().abs() as usize) {
+                    for _ in 0..count {
                         self.session
                             .send_mouse("wheel", "down", &mods, 0, row, col);
                     }

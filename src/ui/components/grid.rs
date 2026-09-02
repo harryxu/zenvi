@@ -24,10 +24,11 @@ pub fn render_grid(
 
     let mut row_elements = Vec::with_capacity(grid.height);
 
-    for row in grid.cells.iter() {
+    for row in grid.rows() {
         // Find the rightmost cell that has content or non-default styling
         let last_content_col = row.iter().rposition(|cell| {
-            if cell.text != " " && !cell.text.is_empty() {
+            let s = cell.text_str();
+            if s != " " && !s.is_empty() {
                 return true;
             }
             if let Some(attr) = state.highlights.get(&cell.hl_id) {
@@ -46,22 +47,23 @@ pub fn render_grid(
         };
 
         let visible_cells = &row[..=last_col];
-        let mut line_text = String::with_capacity(visible_cells.len());
+        let mut line_text = String::with_capacity(visible_cells.len() * 2);
         let mut highlights: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
 
         for cell in visible_cells {
             // In Neovim ext_linegrid, a double-width character occupies 2 cells:
             // the first cell contains the character, and the second cell has width == 0 and text == "".
             // Skip the second trailing cell so we don't insert an extra space.
-            if cell.width == 0 && cell.text.is_empty() {
+            let text = cell.text_str();
+            if cell.width == 0 && text.is_empty() {
                 continue;
             }
 
             let start_byte = line_text.len();
-            if cell.text.is_empty() {
+            if text.is_empty() {
                 line_text.push(' ');
             } else {
-                line_text.push_str(&cell.text);
+                line_text.push_str(text);
             }
             let end_byte = line_text.len();
 
@@ -139,13 +141,17 @@ pub fn render_grid(
     let cursor_x = cursor_col as f32 * char_width;
     let cursor_y = cursor_row as f32 * lh_f32;
 
-    let cell_under_cursor = grid
-        .cells
-        .get(cursor_row)
-        .and_then(|row| row.get(cursor_col));
+    let cell_under_cursor = grid.get_cell(cursor_row, cursor_col);
 
     let cursor_text = cell_under_cursor
-        .map(|c| if c.text.is_empty() { " " } else { c.text.as_str() })
+        .map(|c| {
+            let s = c.text_str();
+            if s.is_empty() {
+                " "
+            } else {
+                s
+            }
+        })
         .unwrap_or(" ");
 
     let cursor_cell_width = cell_under_cursor.map(|c| c.width.max(1)).unwrap_or(1);

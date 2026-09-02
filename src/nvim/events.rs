@@ -1,17 +1,18 @@
 use crate::nvim::state::{Cell, HighlightAttr, ModeInfo, NvimState};
 use rmpv::Value;
 
-pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) {
+pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) -> bool {
     if event.is_empty() {
-        return;
+        return false;
     }
 
     let name = match event[0].as_str() {
         Some(n) => n,
-        None => return,
+        None => return false,
     };
     // println!("REDRAW: {}", name);
 
+    let mut is_flush = false;
     let calls = &event[1..];
     for call_val in calls {
         let args = match call_val.as_array() {
@@ -117,7 +118,7 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) {
                                     continue;
                                 }
 
-                                let text = cell_info[0].as_str().unwrap_or("").to_string();
+                                let text = cell_info[0].as_str().unwrap_or("");
                                 if cell_info.len() >= 2 {
                                     current_hl = cell_info[1].as_u64().unwrap_or(0) as u32;
                                 }
@@ -127,16 +128,13 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) {
                                     1
                                 };
 
-                                let char_width = unicode_width::UnicodeWidthStr::width(text.as_str());
-                                let cell = Cell {
-                                    text: text.clone(),
-                                    hl_id: current_hl,
-                                    width: char_width,
-                                };
+                                let char_width = unicode_width::UnicodeWidthStr::width(text);
+                                let cell = Cell::new(text, current_hl, char_width);
 
+                                let row_slice = grid.row_mut(row);
                                 for _ in 0..repeat {
-                                    if col_start < grid.width {
-                                        grid.cells[row][col_start] = cell.clone();
+                                    if col_start < row_slice.len() {
+                                        row_slice[col_start] = cell;
                                         col_start += 1;
                                     }
                                 }
@@ -261,11 +259,12 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) {
                 }
             }
             "flush" => {
-                // Redraw batch completed
+                is_flush = true;
             }
             _ => {}
         }
     }
+    is_flush
 }
 
 #[cfg(test)]
@@ -398,14 +397,14 @@ mod tests {
         let grid = state.grids.get(&1).unwrap();
         // Cols 0, 1, 2 should be "A" with hl_id 5
         for col in 0..3 {
-            assert_eq!(grid.cells[0][col].text, "A");
-            assert_eq!(grid.cells[0][col].hl_id, 5);
-            assert_eq!(grid.cells[0][col].width, 1);
+            assert_eq!(grid.row(0)[col].text_str(), "A");
+            assert_eq!(grid.row(0)[col].hl_id, 5);
+            assert_eq!(grid.row(0)[col].width, 1);
         }
         // Col 3 should be "B" with hl_id 6
-        assert_eq!(grid.cells[0][3].text, "B");
-        assert_eq!(grid.cells[0][3].hl_id, 6);
-        assert_eq!(grid.cells[0][3].width, 1);
+        assert_eq!(grid.row(0)[3].text_str(), "B");
+        assert_eq!(grid.row(0)[3].hl_id, 6);
+        assert_eq!(grid.row(0)[3].width, 1);
     }
 
     #[test]
@@ -429,10 +428,10 @@ mod tests {
         handle_redraw_event(&mut state, &event);
 
         let grid = state.grids.get(&1).unwrap();
-        assert_eq!(grid.cells[1][0].text, "中");
-        assert_eq!(grid.cells[1][0].width, 2);
-        assert_eq!(grid.cells[1][1].text, "");
-        assert_eq!(grid.cells[1][1].width, 0);
+        assert_eq!(grid.row(1)[0].text_str(), "中");
+        assert_eq!(grid.row(1)[0].width, 2);
+        assert_eq!(grid.row(1)[1].text_str(), "");
+        assert_eq!(grid.row(1)[1].width, 0);
     }
 
     #[test]
@@ -458,8 +457,8 @@ mod tests {
     fn test_handle_grid_scroll() {
         let mut state = NvimState::default();
         if let Some(grid) = state.grids.get_mut(&1) {
-            grid.cells[0][0].text = "Top".to_string();
-            grid.cells[1][0].text = "Second".to_string();
+            grid.set_cell(0, 0, Cell::new("Top", 0, 1));
+            grid.set_cell(1, 0, Cell::new("Second", 0, 1));
         }
 
         let event = vec![
@@ -477,14 +476,14 @@ mod tests {
         handle_redraw_event(&mut state, &event);
 
         let grid = state.grids.get(&1).unwrap();
-        assert_eq!(grid.cells[0][0].text, "Second");
+        assert_eq!(grid.get_cell(0, 0).unwrap().text_str(), "Second");
     }
 
     #[test]
     fn test_handle_grid_clear_and_destroy() {
         let mut state = NvimState::default();
         if let Some(grid) = state.grids.get_mut(&1) {
-            grid.cells[0][0].text = "Hello".to_string();
+            grid.set_cell(0, 0, Cell::new("Hello", 0, 1));
         }
 
         // grid_clear
@@ -493,7 +492,7 @@ mod tests {
             Value::Array(vec![Value::from(1u64)]),
         ];
         handle_redraw_event(&mut state, &clear_event);
-        assert_eq!(state.grids.get(&1).unwrap().cells[0][0].text, " ");
+        assert_eq!(state.grids.get(&1).unwrap().get_cell(0, 0).unwrap().text_str(), " ");
 
         // grid_destroy
         let destroy_event = vec![

@@ -47,6 +47,11 @@ pub struct ZenviView {
     pub is_menu_open: bool,
     #[allow(dead_code)]
     pub active_submenu: Option<usize>,
+    pub last_window_title: String,
+    pub last_applied_shadow_size: f32,
+    pub last_resize_instant: std::time::Instant,
+    pub pending_resize: Option<(usize, usize)>,
+    pub(crate) _resize_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
 }
 
@@ -139,6 +144,11 @@ impl ZenviView {
             current_shadow_size: 0.0,
             is_menu_open: false,
             active_submenu: None,
+            last_window_title: String::new(),
+            last_applied_shadow_size: -1.0,
+            last_resize_instant: std::time::Instant::now(),
+            pending_resize: None,
+            _resize_task: None,
             _event_task: Some(event_task),
         }
     }
@@ -306,11 +316,18 @@ impl Render for ZenviView {
         } else {
             px(0.0)
         };
-        self.current_shadow_size = shadow_size.into();
-        window.set_client_inset(shadow_size);
+        let shadow_f32: f32 = shadow_size.into();
+        self.current_shadow_size = shadow_f32;
+        if (self.last_applied_shadow_size - shadow_f32).abs() > 0.001 {
+            self.last_applied_shadow_size = shadow_f32;
+            window.set_client_inset(shadow_size);
+        }
 
         let display_title = components::titlebar::format_title(&state.title);
-        window.set_window_title(&display_title);
+        if self.last_window_title != display_title {
+            self.last_window_title = display_title.clone();
+            window.set_window_title(&display_title);
+        }
 
         let default_grid = crate::nvim::state::Grid::new(1, 80, 24);
         let grid = state
@@ -319,11 +336,10 @@ impl Render for ZenviView {
             .or_else(|| state.grids.get(&state.active_grid))
             .unwrap_or(&default_grid);
 
-        // Calculate grid dimensions and notify Neovim of resize
+        // Calculate grid dimensions and notify Neovim of resize with 25ms throttling
         let viewport = window.viewport_size();
         let window_w: f32 = viewport.width.into();
         let window_h: f32 = viewport.height.into();
-        let shadow_f32: f32 = shadow_size.into();
         let content_w = (window_w - shadow_f32 * 2.0).max(100.0);
         let content_h = (window_h - shadow_f32 * 2.0).max(100.0);
         let lh: f32 = self.line_height.into();
@@ -337,7 +353,33 @@ impl Render for ZenviView {
         if cols != self.last_cols || rows != self.last_rows {
             self.last_cols = cols;
             self.last_rows = rows;
-            self.session.try_resize(cols, rows);
+
+            let now = std::time::Instant::now();
+            let elapsed = now.duration_since(self.last_resize_instant);
+            if elapsed >= std::time::Duration::from_millis(25) {
+                self.last_resize_instant = now;
+                self.pending_resize = None;
+                self.session.try_resize(cols, rows);
+            } else {
+                self.pending_resize = Some((cols, rows));
+                let remaining = std::time::Duration::from_millis(25).saturating_sub(elapsed);
+                self._resize_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                    let cx = cx.clone();
+                    async move {
+                        tokio::time::sleep(remaining).await;
+                        let _ = cx.update(|cx| {
+                            if let Some(entity) = this.upgrade() {
+                                entity.update(cx, |this, _cx| {
+                                    if let Some((c, r)) = this.pending_resize.take() {
+                                        this.last_resize_instant = std::time::Instant::now();
+                                        this.session.try_resize(c, r);
+                                    }
+                                });
+                            }
+                        });
+                    }
+                }));
+            }
         }
 
         let grid_element = components::grid::render_grid(

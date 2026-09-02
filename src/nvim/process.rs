@@ -250,11 +250,12 @@ impl NvimSession {
                                                 let mut s = state_clone.write();
                                                 for event in params {
                                                     if let Some(event_arr) = event.as_array() {
-                                                        handle_redraw_event(&mut s, event_arr);
+                                                        if handle_redraw_event(&mut s, event_arr) {
+                                                            has_redraw = true;
+                                                        }
                                                     }
                                                 }
                                             }
-                                            has_redraw = true;
                                         }
                                     }
                                     RpcMessage::Response {
