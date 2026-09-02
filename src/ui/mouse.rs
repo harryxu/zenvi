@@ -63,10 +63,16 @@ impl ZenviView {
         if button == "left" {
             self.is_mouse_down = true;
             self.last_mouse_pos = Some((col, row));
+            // When clicking the right border scrollbar, lock the drag column to this position.
+            // This grants mouse capture so moving horizontally into the editor buffer won't abort the scrollbar drag.
+            if col >= self.last_cols.saturating_sub(3) {
+                self.scrollbar_drag_col = Some(col);
+            } else {
+                self.scrollbar_drag_col = None;
+            }
             cx.notify(); // Re-render to dynamically attach on_mouse_move listener
         }
         let mods = mods_to_nvim(modifiers);
-        eprintln!("[MOUSE_DOWN] button={}, row={}, col={}", button, row, col);
         self.session
             .send_mouse(button, "press", mods, 0, row, col);
     }
@@ -80,41 +86,73 @@ impl ZenviView {
         modifiers: &Modifiers,
         cx: &mut Context<Self>,
     ) {
+        let (col, row) = self.pos_to_grid(position);
+        let effective_col = if button == "left" {
+            self.scrollbar_drag_col.take().unwrap_or(col)
+        } else {
+            col
+        };
+
         if button == "left" {
             self.is_mouse_down = false;
             self.last_mouse_pos = None;
             self.pending_mouse_drag = None;
-            self.mouse_drag_in_flight = false;
             self._drag_task = None;
             cx.notify(); // Re-render to detach on_mouse_move listener
         }
-        let (col, row) = self.pos_to_grid(position);
         let mods = mods_to_nvim(modifiers);
         self.session
-            .send_mouse(button, "release", mods, 0, row, col);
+            .send_mouse(button, "release", mods, 0, row, effective_col);
     }
 
     /// Handles mouse drag when left button is held down.
-    pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent, _cx: &mut Context<Self>) {
+    pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if !self.is_mouse_down {
             return;
         }
         let (col, row) = self.pos_to_grid(event.position);
-        if self.last_mouse_pos == Some((col, row)) {
+        let effective_col = self.scrollbar_drag_col.unwrap_or(col);
+
+        if self.last_mouse_pos == Some((effective_col, row)) {
             return;
         }
-        self.last_mouse_pos = Some((col, row));
+        self.last_mouse_pos = Some((effective_col, row));
         self.last_interaction_instant = Some(std::time::Instant::now());
 
-        if self.mouse_drag_in_flight {
-            // Buffer the latest position. When Neovim finishes the in-flight frame,
-            // the listener will immediately dispatch this latest position with zero queue delay.
-            self.pending_mouse_drag = Some((col, row, event.modifiers.clone()));
-        } else {
-            self.mouse_drag_in_flight = true;
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.last_drag_instant);
+        let interval = std::time::Duration::from_millis(16);
+
+        if elapsed >= interval {
+            self.last_drag_instant = now;
+            self.pending_mouse_drag = None;
+            self._drag_task = None;
             let mods = mods_to_nvim(&event.modifiers);
             self.session
-                .send_mouse("left", "drag", mods, 0, row, col);
+                .send_mouse("left", "drag", mods, 0, row, effective_col);
+        } else {
+            self.pending_mouse_drag = Some((effective_col, row, event.modifiers.clone()));
+            if self._drag_task.is_none() {
+                let remaining = interval.saturating_sub(elapsed);
+                self._drag_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                    let cx = cx.clone();
+                    async move {
+                        tokio::time::sleep(remaining).await;
+                        let _ = cx.update(|cx| {
+                            if let Some(entity) = this.upgrade() {
+                                entity.update(cx, |this, _cx| {
+                                    this._drag_task = None;
+                                    if let Some((c, r, mods)) = this.pending_mouse_drag.take() {
+                                        this.last_drag_instant = std::time::Instant::now();
+                                        let mods_str = mods_to_nvim(&mods);
+                                        this.session.send_mouse("left", "drag", mods_str, 0, r, c);
+                                    }
+                                });
+                            }
+                        });
+                    }
+                }));
+            }
         }
     }
 

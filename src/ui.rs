@@ -55,8 +55,9 @@ pub struct ZenviView {
     pub(crate) _drag_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
     pub last_interaction_instant: Option<std::time::Instant>,
-    pub mouse_drag_in_flight: bool,
+    pub last_drag_instant: std::time::Instant,
     pub pending_mouse_drag: Option<(usize, usize, Modifiers)>,
+    pub scrollbar_drag_col: Option<usize>,
     /// Persistent render cache for incremental grid rendering (dirty-row tracking).
     pub grid_cache: components::grid::GridRenderCache,
 }
@@ -158,8 +159,9 @@ impl ZenviView {
             _drag_task: None,
             _event_task: Some(event_task),
             last_interaction_instant: None,
-            mouse_drag_in_flight: false,
+            last_drag_instant: std::time::Instant::now(),
             pending_mouse_drag: None,
+            scrollbar_drag_col: None,
             grid_cache: components::grid::GridRenderCache::new(),
         }
     }
@@ -182,12 +184,6 @@ impl ZenviView {
                             if entity
                                 .update(&mut cx, |this, cx| {
                                     this.last_interaction_instant = Some(std::time::Instant::now());
-                                    this.mouse_drag_in_flight = false;
-                                    if let Some((col, row, mods)) = this.pending_mouse_drag.take() {
-                                        this.mouse_drag_in_flight = true;
-                                        let mods_str = crate::ui::mouse::mods_to_nvim(&mods);
-                                        this.session.send_mouse("left", "drag", mods_str, 0, row, col);
-                                    }
                                     cx.notify();
                                 })
                                 .is_err()
