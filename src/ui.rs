@@ -305,8 +305,22 @@ impl ZenviView {
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         static RENDER_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let count = RENDER_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        eprintln!("[ZENVI_FRAME] ZenviView::render #{}", count);
+        static LAST_RENDER_LOG: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::Mutex::new(None);
+        let count = RENDER_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+
+        let mut guard = LAST_RENDER_LOG.lock();
+        let now = std::time::Instant::now();
+        if let Some(prev) = *guard {
+            let elapsed = now.duration_since(prev);
+            if elapsed >= std::time::Duration::from_millis(1000) {
+                eprintln!("[FPS_STAT] GPUI View render rate: {:.1} fps ({} frames in {:?})",
+                    count as f64 / elapsed.as_secs_f64(), count, elapsed);
+                RENDER_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
+                *guard = Some(now);
+            }
+        } else {
+            *guard = Some(now);
+        }
 
         // Read Neovim state once for the entire render pass
         let session = Arc::clone(&self.session);
