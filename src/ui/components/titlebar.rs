@@ -1,4 +1,6 @@
 use super::style::derive_titlebar_style;
+#[cfg(not(target_os = "macos"))]
+use super::style::TitlebarStyle;
 use crate::nvim::state::NvimState;
 use crate::ui::{ZenviView, TITLEBAR_HEIGHT};
 use gpui::prelude::*;
@@ -16,62 +18,166 @@ pub fn format_title(raw_title: &str) -> String {
     }
 }
 
-/// Builds the custom titlebar element directly from Neovim's state (macOS version).
-#[cfg(target_os = "macos")]
-pub fn render_titlebar(
-    state: &NvimState,
+/// Renders the hamburger menu toggle button (Linux / Windows).
+#[cfg(not(target_os = "macos"))]
+fn render_menu_button(
+    is_menu_open: bool,
+    style: &TitlebarStyle,
     cx: &mut Context<ZenviView>,
-) -> Stateful<Div> {
-    let title = format_title(&state.title);
-    let style = derive_titlebar_style(state.default_bg, state.default_fg);
-    let default_bg = state.default_bg;
+) -> impl IntoElement {
+    div()
+        .id("menu-btn-toggle")
+        .px(px(6.0))
+        .py(px(2.0))
+        .rounded_sm()
+        .text_size(px(13.0))
+        .text_color(style.title_color)
+        .cursor_pointer()
+        .when(is_menu_open, |s| s.bg(style.menu_active_bg))
+        .hover(move |s| s.bg(style.menu_hover_bg))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, _window, cx| {
+                cx.stop_propagation();
+                this.is_menu_open = !this.is_menu_open;
+                this.active_submenu = None;
+                cx.notify();
+            }),
+        )
+        .child("☰")
+}
 
-    let left_side = div()
+/// Renders the window controls (minimize, maximize/restore, close) for client-side decorations (Linux / Windows).
+#[cfg(not(target_os = "macos"))]
+fn render_window_controls(
+    default_bg: u32,
+    style: &TitlebarStyle,
+    window: &Window,
+    cx: &mut Context<ZenviView>,
+) -> impl IntoElement {
+    let is_maximized = window.is_maximized();
+
+    let min_btn = div()
+        .id("win-ctrl-min")
+        .w(px(38.0))
+        .h(px(TITLEBAR_HEIGHT))
         .flex()
-        .flex_row()
         .items_center()
-        .gap(px(8.0))
+        .justify_center()
+        .cursor_pointer()
+        .hover(move |s| s.bg(style.menu_hover_bg))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|_this, _, window, cx| {
+                cx.stop_propagation();
+                window.minimize_window();
+            }),
+        )
         .child(
             div()
-                .text_size(px(12.0))
-                .font_weight(FontWeight::BOLD)
+                .w(px(10.0))
+                .h(px(1.5))
+                .bg(style.title_color),
+        );
+
+    let max_btn = div()
+        .id("win-ctrl-max")
+        .w(px(38.0))
+        .h(px(TITLEBAR_HEIGHT))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .hover(move |s| s.bg(style.menu_hover_bg))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|_this, _, window, cx| {
+                cx.stop_propagation();
+                window.zoom_window();
+            }),
+        )
+        .child(if is_maximized {
+            // Restore icon (two layered boxes)
+            div()
+                .relative()
+                .size(px(10.0))
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(0.0))
+                        .right(px(0.0))
+                        .size(px(7.5))
+                        .border_1()
+                        .border_color(style.title_color),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .bottom(px(0.0))
+                        .left(px(0.0))
+                        .size(px(7.5))
+                        .bg(rgb(default_bg))
+                        .border_1()
+                        .border_color(style.title_color),
+                )
+        } else {
+            // Maximize icon (single box)
+            div()
+                .size(px(9.0))
+                .border_1()
+                .border_color(style.title_color)
+        });
+
+    let close_btn = div()
+        .id("win-ctrl-close")
+        .w(px(42.0))
+        .h(px(TITLEBAR_HEIGHT))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .when(!is_maximized, |d| d.rounded_tr(px(10.0)))
+        .hover(|s| s.bg(rgb(0xe81123)))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, window, cx| {
+                cx.stop_propagation();
+                this.session.send_command("qa");
+                let window_handle = window.window_handle();
+                cx.defer(move |cx| {
+                    if cx.windows().len() <= 1 {
+                        cx.quit();
+                    } else if cx.windows().contains(&window_handle) {
+                        let _ = window_handle.update(cx, |_, window, _cx| {
+                            window.remove_window();
+                        });
+                    }
+                });
+            }),
+        )
+        .child(
+            div()
+                .text_size(px(13.0))
                 .text_color(style.title_color)
-                .child(title),
+                .child("✕"),
         );
 
     div()
-        .id("zenvi-titlebar")
-        .relative()
-        .h(px(TITLEBAR_HEIGHT))
-        .w_full()
         .flex()
         .flex_row()
         .items_center()
-        .justify_between()
-        .pl(px(78.0))
-        .pr(px(12.0))
-        .bg(rgb(default_bg))
-        .border_b_1()
-        .border_color(style.border_color)
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|_this, event: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                if event.click_count == 2 {
-                    window.titlebar_double_click();
-                }
-            }),
-        )
-        .child(left_side)
+        .h_full()
+        .child(min_btn)
+        .child(max_btn)
+        .child(close_btn)
 }
 
-/// Builds the custom titlebar element directly from Neovim's state (Linux / Windows version).
-#[cfg(not(target_os = "macos"))]
+/// Builds the custom titlebar element directly from Neovim's state.
 pub fn render_titlebar(
     state: &NvimState,
-    is_menu_open: bool,
-    borderless: bool,
-    window: &Window,
+    #[cfg_attr(target_os = "macos", allow(unused_variables))] is_menu_open: bool,
+    #[cfg_attr(target_os = "macos", allow(unused_variables))] borderless: bool,
+    #[cfg_attr(target_os = "macos", allow(unused_variables))] window: &Window,
     cx: &mut Context<ZenviView>,
 ) -> Stateful<Div> {
     let title = format_title(&state.title);
@@ -82,156 +188,18 @@ pub fn render_titlebar(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(8.0))
-        .child(
-            div()
-                .id("menu-btn-toggle")
-                .px(px(6.0))
-                .py(px(2.0))
-                .rounded_sm()
-                .text_size(px(13.0))
-                .text_color(style.title_color)
-                .cursor_pointer()
-                .when(is_menu_open, |s| s.bg(style.menu_active_bg))
-                .hover(move |s| s.bg(style.menu_hover_bg))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _window, cx| {
-                        cx.stop_propagation();
-                        this.is_menu_open = !this.is_menu_open;
-                        this.active_submenu = None;
-                        cx.notify();
-                    }),
-                )
-                .child("☰"),
-        )
-        .child(
-            div()
-                .text_size(px(12.0))
-                .font_weight(FontWeight::BOLD)
-                .text_color(style.title_color)
-                .child(title.to_string()),
-        );
+        .gap(px(8.0));
 
-    let right_side = if borderless {
-        let is_maximized = window.is_maximized();
+    #[cfg(not(target_os = "macos"))]
+    let left_side = left_side.child(render_menu_button(is_menu_open, &style, cx));
 
-        let min_btn = div()
-            .id("win-ctrl-min")
-            .w(px(38.0))
-            .h(px(TITLEBAR_HEIGHT))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .hover(move |s| s.bg(style.menu_hover_bg))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|_this, _, window, cx| {
-                    cx.stop_propagation();
-                    window.minimize_window();
-                }),
-            )
-            .child(
-                div()
-                    .w(px(10.0))
-                    .h(px(1.5))
-                    .bg(style.title_color),
-            );
-
-        let max_btn = div()
-            .id("win-ctrl-max")
-            .w(px(38.0))
-            .h(px(TITLEBAR_HEIGHT))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .hover(move |s| s.bg(style.menu_hover_bg))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|_this, _, window, cx| {
-                    cx.stop_propagation();
-                    window.zoom_window();
-                }),
-            )
-            .child(if is_maximized {
-                // Restore icon (two layered boxes)
-                div()
-                    .relative()
-                    .size(px(10.0))
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(0.0))
-                            .right(px(0.0))
-                            .size(px(7.5))
-                            .border_1()
-                            .border_color(style.title_color),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .bottom(px(0.0))
-                            .left(px(0.0))
-                            .size(px(7.5))
-                            .bg(rgb(default_bg))
-                            .border_1()
-                            .border_color(style.title_color),
-                    )
-            } else {
-                // Maximize icon (single box)
-                div()
-                    .size(px(9.0))
-                    .border_1()
-                    .border_color(style.title_color)
-            });
-
-        let close_btn = div()
-            .id("win-ctrl-close")
-            .w(px(42.0))
-            .h(px(TITLEBAR_HEIGHT))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .when(!is_maximized, |d| d.rounded_tr(px(10.0)))
-            .hover(|s| s.bg(rgb(0xe81123)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.session.send_command("qa");
-                    let window_handle = window.window_handle();
-                    cx.defer(move |cx| {
-                        if cx.windows().len() <= 1 {
-                            cx.quit();
-                        } else if cx.windows().contains(&window_handle) {
-                            let _ = window_handle.update(cx, |_, window, _cx| {
-                                window.remove_window();
-                            });
-                        }
-                    });
-                }),
-            )
-            .child(
-                div()
-                    .text_size(px(13.0))
-                    .text_color(style.title_color)
-                    .child("✕"),
-            );
-
+    let left_side = left_side.child(
         div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .h_full()
-            .child(min_btn)
-            .child(max_btn)
-            .child(close_btn)
-    } else {
-        div()
-    };
+            .text_size(px(12.0))
+            .font_weight(FontWeight::BOLD)
+            .text_color(style.title_color)
+            .child(title),
+    );
 
     let bar = div()
         .id("zenvi-titlebar")
@@ -242,40 +210,62 @@ pub fn render_titlebar(
         .flex_row()
         .items_center()
         .justify_between()
-        .pl(px(8.0))
-        .pr(if borderless { px(0.0) } else { px(12.0) })
         .bg(rgb(default_bg))
         .border_b_1()
-        .border_color(style.border_color)
-        .when(borderless && !window.is_maximized(), |d| {
-            d.rounded_t(px(10.0))
-        })
+        .border_color(style.border_color);
+
+    #[cfg(target_os = "macos")]
+    let bar = bar
+        .pl(px(78.0))
+        .pr(px(12.0))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|_this, event: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 if event.click_count == 2 {
-                    window.zoom_window();
-                } else if event.click_count == 1 {
-                    window.start_window_move();
+                    window.titlebar_double_click();
                 }
             }),
         )
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(|_this, event: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                window.show_window_menu(event.position);
-            }),
-        )
-        .child(left_side)
-        .child(right_side);
+        .child(left_side);
 
-    if borderless {
-        bar.window_control_area(WindowControlArea::Drag)
-    } else {
-        bar
-    }
+    #[cfg(not(target_os = "macos"))]
+    let bar = {
+        let is_maximized = window.is_maximized();
+        let right_side = if borderless {
+            Some(render_window_controls(default_bg, &style, window, cx))
+        } else {
+            None
+        };
+
+        let bar = bar
+            .pl(px(8.0))
+            .pr(if borderless { px(0.0) } else { px(12.0) })
+            .when(borderless && !is_maximized, |d| {
+                d.rounded_t(px(10.0))
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    if event.click_count == 2 {
+                        window.zoom_window();
+                    } else if event.click_count == 1 {
+                        window.start_window_move();
+                    }
+                }),
+            )
+            .child(left_side)
+            .children(right_side);
+
+        if borderless {
+            bar.window_control_area(WindowControlArea::Drag)
+        } else {
+            bar
+        }
+    };
+
+    bar
 }
 
 #[cfg(test)]

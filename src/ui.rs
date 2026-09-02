@@ -44,9 +44,8 @@ pub struct ZenviView {
     pub borderless: bool,
     /// The currently active window shadow inset (in pixels).
     pub current_shadow_size: f32,
-    #[cfg(not(target_os = "macos"))]
     pub is_menu_open: bool,
-    #[cfg(not(target_os = "macos"))]
+    #[allow(dead_code)]
     pub active_submenu: Option<usize>,
     pub(crate) _event_task: Option<Task<()>>,
 }
@@ -138,9 +137,7 @@ impl ZenviView {
             marked_text: None,
             borderless,
             current_shadow_size: 0.0,
-            #[cfg(not(target_os = "macos"))]
             is_menu_open: false,
-            #[cfg(not(target_os = "macos"))]
             active_submenu: None,
             _event_task: Some(event_task),
         }
@@ -355,10 +352,13 @@ impl Render for ZenviView {
         let focus_handle = self.focus_handle.clone();
         let entity = cx.entity().clone();
 
-        #[cfg(target_os = "macos")]
-        let titlebar_element = components::titlebar::render_titlebar(&state, cx);
-        #[cfg(not(target_os = "macos"))]
-        let titlebar_element = components::titlebar::render_titlebar(&state, self.is_menu_open, self.borderless, window, cx);
+        let titlebar_element = components::titlebar::render_titlebar(
+            &state,
+            self.is_menu_open,
+            self.borderless,
+            window,
+            cx,
+        );
 
         // Build inner window element tree
         let inner = div()
