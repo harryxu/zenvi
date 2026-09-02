@@ -62,8 +62,6 @@ impl ZenviView {
         let (col, row) = self.pos_to_grid(position);
         if button == "left" {
             self.is_mouse_down = true;
-            self.mouse_drag_in_flight = false;
-            self.pending_mouse_drag = None;
             self.last_mouse_pos = Some((col, row));
             cx.notify(); // Re-render to dynamically attach on_mouse_move listener
         }
@@ -85,8 +83,6 @@ impl ZenviView {
         if button == "left" {
             self.is_mouse_down = false;
             self.last_mouse_pos = None;
-            self.mouse_drag_in_flight = false;
-            self.pending_mouse_drag = None;
             self._drag_task = None;
             cx.notify(); // Re-render to detach on_mouse_move listener
         }
@@ -97,7 +93,7 @@ impl ZenviView {
             .send_mouse(button, "release", mods, 0, row, col);
     }
 
-    /// Handles mouse drag when left button is held down with backpressure coalescing.
+    /// Handles mouse drag when left button is held down.
     pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent, _cx: &mut Context<Self>) {
         if !self.is_mouse_down {
             return;
@@ -116,33 +112,16 @@ impl ZenviView {
         if should_update {
             self.last_mouse_pos = Some((col, row));
             let mods = mods_to_nvim(&event.modifiers);
-
-            let now = std::time::Instant::now();
-            let elapsed = now.duration_since(self.last_mouse_drag_instant);
-
-            // Backpressure: If a drag event is currently in flight to Neovim, do NOT send
-            // intermediate coordinates! Store the latest coordinate in pending_mouse_drag.
-            // As soon as Neovim finishes rendering this frame, the latest coordinate is sent.
-            // Safety timeout: If Neovim hasn't sent Redraw within 30ms, release in-flight flag.
-            if !self.mouse_drag_in_flight || elapsed >= std::time::Duration::from_millis(30) {
-                self.mouse_drag_in_flight = true;
-                self.pending_mouse_drag = None;
-                self.last_mouse_drag_instant = now;
-                self.session
-                    .send_mouse("left", "drag", mods, 0, row, col);
-            } else {
-                self.pending_mouse_drag = Some((mods, row, col));
-            }
+            self.session
+                .send_mouse("left", "drag", mods, 0, row, col);
         }
     }
 
     /// Handles scroll wheel events, converting pixel or line deltas
-    /// into discrete Neovim scroll commands with backpressure control.
+    /// into discrete Neovim scroll commands with calibrated distance.
     pub fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent) {
         let (col, row) = self.pos_to_grid(event.position);
         let mods = mods_to_nvim(&event.modifiers);
-        self.last_wheel_mods = mods;
-        self.last_wheel_pos = (col, row);
 
         let lh_f32: f32 = self.line_height.into();
         // Calibrated step: 1 wheel notch (~100-120px) or swipe produces 1-2 ticks (~3-6 lines in Neovim),
@@ -172,21 +151,9 @@ impl ZenviView {
         }
 
         if ticks != 0 {
-            // Clamp pending buffer to 4 ticks so rolling stops promptly without lingering inertia.
-            self.pending_wheel_ticks = (self.pending_wheel_ticks + ticks).clamp(-4, 4);
-
-            if !self.wheel_scroll_in_flight {
-                let count = self.pending_wheel_ticks.abs().min(3);
-                let dir = if self.pending_wheel_ticks > 0 { "up" } else { "down" };
-                if self.pending_wheel_ticks > 0 {
-                    self.pending_wheel_ticks -= count;
-                } else {
-                    self.pending_wheel_ticks += count;
-                }
-                self.wheel_scroll_in_flight = true;
-                for _ in 0..count {
-                    self.session.send_mouse("wheel", dir, mods, 0, row, col);
-                }
+            let dir = if ticks > 0 { "up" } else { "down" };
+            for _ in 0..ticks.abs() {
+                self.session.send_mouse("wheel", dir, mods, 0, row, col);
             }
         }
     }

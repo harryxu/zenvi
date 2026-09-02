@@ -52,13 +52,6 @@ pub struct ZenviView {
     pub last_resize_instant: std::time::Instant,
     pub pending_resize: Option<(usize, usize)>,
     pub(crate) _resize_task: Option<Task<()>>,
-    pub last_mouse_drag_instant: std::time::Instant,
-    pub pending_mouse_drag: Option<(&'static str, usize, usize)>,
-    pub mouse_drag_in_flight: bool,
-    pub wheel_scroll_in_flight: bool,
-    pub pending_wheel_ticks: i32,
-    pub last_wheel_mods: &'static str,
-    pub last_wheel_pos: (usize, usize),
     pub(crate) _drag_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
     /// Persistent render cache for incremental grid rendering (dirty-row tracking).
@@ -159,13 +152,6 @@ impl ZenviView {
             last_resize_instant: std::time::Instant::now(),
             pending_resize: None,
             _resize_task: None,
-            last_mouse_drag_instant: std::time::Instant::now(),
-            pending_mouse_drag: None,
-            mouse_drag_in_flight: false,
-            wheel_scroll_in_flight: false,
-            pending_wheel_ticks: 0,
-            last_wheel_mods: "",
-            last_wheel_pos: (0, 0),
             _drag_task: None,
             _event_task: Some(event_task),
             grid_cache: components::grid::GridRenderCache::new(),
@@ -181,67 +167,23 @@ impl ZenviView {
             let mut cx = cx.clone();
             async move {
                 while let Some(event) = event_rx.recv().await {
-                    let mut needs_redraw = false;
                     let mut should_exit = false;
-
                     match event {
-                        NvimEvent::Redraw => needs_redraw = true,
-                        NvimEvent::Exit => should_exit = true,
-                    }
-
-                    // Coalesce burst redraw notifications into a single render pass
-                    while let Ok(next_event) = event_rx.try_recv() {
-                        match next_event {
-                            NvimEvent::Redraw => needs_redraw = true,
-                            NvimEvent::Exit => should_exit = true,
+                        NvimEvent::Redraw => {
+                            let Some(entity) = this.upgrade() else {
+                                break;
+                            };
+                            if entity
+                                .update(&mut cx, |_this, cx| {
+                                    cx.notify();
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
                         }
-                    }
-
-                    // Exit early if the view/window has already been dropped
-                    let Some(entity) = this.upgrade() else {
-                        break;
-                    };
-
-                    if needs_redraw {
-                        if entity
-                            .update(&mut cx, |this, cx| {
-                                this.mouse_drag_in_flight = false;
-
-                                // Backpressure dispatch for mouse dragging:
-                                // If the mouse is still down and a newer drag coordinate arrived
-                                // while Neovim was busy, immediately send the latest coordinate now!
-                                if this.is_mouse_down {
-                                    if let Some((mods, row, col)) = this.pending_mouse_drag.take() {
-                                        this.mouse_drag_in_flight = true;
-                                        this.last_mouse_drag_instant = std::time::Instant::now();
-                                        this.session.send_mouse("left", "drag", mods, 0, row, col);
-                                    }
-                                } else {
-                                    this.pending_mouse_drag = None;
-                                }
-
-                                // Backpressure dispatch for wheel scrolling (batch up to 3 ticks per cycle)
-                                this.wheel_scroll_in_flight = false;
-                                if this.pending_wheel_ticks != 0 {
-                                    let count = this.pending_wheel_ticks.abs().min(3);
-                                    let dir = if this.pending_wheel_ticks > 0 { "up" } else { "down" };
-                                    if this.pending_wheel_ticks > 0 {
-                                        this.pending_wheel_ticks -= count;
-                                    } else {
-                                        this.pending_wheel_ticks += count;
-                                    }
-                                    this.wheel_scroll_in_flight = true;
-                                    let (col, row) = this.last_wheel_pos;
-                                    for _ in 0..count {
-                                        this.session.send_mouse("wheel", dir, this.last_wheel_mods, 0, row, col);
-                                    }
-                                }
-
-                                cx.notify();
-                            })
-                            .is_err()
-                        {
-                            break;
+                        NvimEvent::Exit => {
+                            should_exit = true;
                         }
                     }
 
