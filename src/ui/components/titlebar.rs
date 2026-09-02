@@ -27,11 +27,12 @@ fn render_menu_button(
 ) -> impl IntoElement {
     div()
         .id("menu-btn-toggle")
+        .flex()
+        .items_center()
+        .justify_center()
         .px(px(6.0))
-        .py(px(2.0))
+        .py(px(4.0))
         .rounded_sm()
-        .text_size(px(13.0))
-        .text_color(style.title_color)
         .cursor_pointer()
         .when(is_menu_open, |s| s.bg(style.menu_active_bg))
         .hover(move |s| s.bg(style.menu_hover_bg))
@@ -44,7 +45,12 @@ fn render_menu_button(
                 cx.notify();
             }),
         )
-        .child("☰")
+        .child(
+            svg()
+                .path("icons/menu.svg")
+                .size(px(14.0))
+                .text_color(style.title_color),
+        )
 }
 
 /// Renders the window controls (minimize, maximize/restore, close) for client-side decorations (Linux / Windows).
