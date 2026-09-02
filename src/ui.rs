@@ -54,6 +54,11 @@ pub struct ZenviView {
     pub(crate) _resize_task: Option<Task<()>>,
     pub last_mouse_drag_instant: std::time::Instant,
     pub pending_mouse_drag: Option<(&'static str, usize, usize)>,
+    pub mouse_drag_in_flight: bool,
+    pub wheel_scroll_in_flight: bool,
+    pub pending_wheel_ticks: i32,
+    pub last_wheel_mods: &'static str,
+    pub last_wheel_pos: (usize, usize),
     pub(crate) _drag_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
     /// Persistent render cache for incremental grid rendering (dirty-row tracking).
@@ -156,6 +161,11 @@ impl ZenviView {
             _resize_task: None,
             last_mouse_drag_instant: std::time::Instant::now(),
             pending_mouse_drag: None,
+            mouse_drag_in_flight: false,
+            wheel_scroll_in_flight: false,
+            pending_wheel_ticks: 0,
+            last_wheel_mods: "",
+            last_wheel_pos: (0, 0),
             _drag_task: None,
             _event_task: Some(event_task),
             grid_cache: components::grid::GridRenderCache::new(),
@@ -193,9 +203,37 @@ impl ZenviView {
                     };
 
                     if needs_redraw {
-                        eprintln!("[ZENVI_FRAME] Neovim Redraw notification received");
                         if entity
-                            .update(&mut cx, |_this, cx| {
+                            .update(&mut cx, |this, cx| {
+                                this.mouse_drag_in_flight = false;
+
+                                // Backpressure dispatch for mouse dragging:
+                                // If the mouse is still down and a newer drag coordinate arrived
+                                // while Neovim was busy, immediately send the latest coordinate now!
+                                if this.is_mouse_down {
+                                    if let Some((mods, row, col)) = this.pending_mouse_drag.take() {
+                                        this.mouse_drag_in_flight = true;
+                                        this.last_mouse_drag_instant = std::time::Instant::now();
+                                        this.session.send_mouse("left", "drag", mods, 0, row, col);
+                                    }
+                                } else {
+                                    this.pending_mouse_drag = None;
+                                }
+
+                                // Backpressure dispatch for wheel scrolling
+                                this.wheel_scroll_in_flight = false;
+                                if this.pending_wheel_ticks > 0 {
+                                    this.pending_wheel_ticks -= 1;
+                                    this.wheel_scroll_in_flight = true;
+                                    let (col, row) = this.last_wheel_pos;
+                                    this.session.send_mouse("wheel", "up", this.last_wheel_mods, 0, row, col);
+                                } else if this.pending_wheel_ticks < 0 {
+                                    this.pending_wheel_ticks += 1;
+                                    this.wheel_scroll_in_flight = true;
+                                    let (col, row) = this.last_wheel_pos;
+                                    this.session.send_mouse("wheel", "down", this.last_wheel_mods, 0, row, col);
+                                }
+
                                 cx.notify();
                             })
                             .is_err()
