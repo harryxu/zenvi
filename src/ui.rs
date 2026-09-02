@@ -54,6 +54,7 @@ pub struct ZenviView {
     pub(crate) _resize_task: Option<Task<()>>,
     pub(crate) _drag_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
+    pub(crate) _render_pump_task: Option<Task<()>>,
     pub last_interaction_instant: Option<std::time::Instant>,
     pub last_drag_instant: std::time::Instant,
     pub pending_mouse_drag: Option<(usize, usize, Modifiers)>,
@@ -158,6 +159,7 @@ impl ZenviView {
             _resize_task: None,
             _drag_task: None,
             _event_task: Some(event_task),
+            _render_pump_task: None,
             last_interaction_instant: None,
             last_drag_instant: std::time::Instant::now(),
             pending_mouse_drag: None,
@@ -183,7 +185,7 @@ impl ZenviView {
                             };
                             if entity
                                 .update(&mut cx, |this, cx| {
-                                    this.last_interaction_instant = Some(std::time::Instant::now());
+                                    this.trigger_interaction(cx);
                                     cx.notify();
                                 })
                                 .is_err()
@@ -211,6 +213,48 @@ impl ZenviView {
                 }
             }
         })
+    }
+
+    /// Triggers the active 60 FPS swapchain presentation loop during user interaction
+    /// (aligning with Neovide's active presentation model).
+    /// Keeps pumping 60 FPS frames while user interaction or Neovim redraws occur,
+    /// then silently stops after 300ms of inactivity to guarantee 0 FPS idle.
+    pub(crate) fn trigger_interaction(&mut self, cx: &mut Context<Self>) {
+        self.last_interaction_instant = Some(std::time::Instant::now());
+        if self._render_pump_task.is_none() {
+            self._render_pump_task = Some(cx.spawn(|this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                let cx = cx.clone();
+                async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+                    interval.tick().await; // Skip initial tick
+                    loop {
+                        interval.tick().await;
+                        let active = cx
+                            .update(|cx| {
+                                let Some(entity) = this.upgrade() else {
+                                    return false;
+                                };
+                                entity.update(cx, |this, cx| {
+                                    if let Some(t) = this.last_interaction_instant {
+                                        if t.elapsed() < std::time::Duration::from_millis(300) {
+                                            cx.notify();
+                                            return true;
+                                        }
+                                    }
+                                    this.last_interaction_instant = None;
+                                    this._render_pump_task = None;
+                                    false
+                                })
+                            })
+                            .unwrap_or(false);
+
+                        if !active {
+                            break;
+                        }
+                    }
+                }
+            }));
+        }
     }
 
     /// Binds all GPUI action handlers to the root element.
@@ -295,8 +339,8 @@ impl ZenviView {
                     this.handle_mouse_up("middle", event.position, &event.modifiers, cx);
                 }),
             )
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
-                this.handle_scroll_wheel(event);
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
+                this.handle_scroll_wheel(event, cx);
             }));
 
         // Dynamically bind on_mouse_move ONLY when left button is held down (dragging).
@@ -313,19 +357,6 @@ impl ZenviView {
 
 impl Render for ZenviView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Active interaction animation loop (aligns with Neovide 60 FPS swapchain presentation):
-        // While user is actively scrolling, dragging, or receiving redraws, pump frames at 60 FPS VSync.
-        // Once interaction ceases for 250ms, automatically returns to 0 FPS silent idle.
-        if let Some(t) = self.last_interaction_instant {
-            if t.elapsed() < std::time::Duration::from_millis(250) {
-                cx.on_next_frame(window, |_this, _window, cx| {
-                    cx.notify();
-                });
-            } else {
-                self.last_interaction_instant = None;
-            }
-        }
-
         // Read Neovim state once for the entire render pass
         let session = Arc::clone(&self.session);
         let state = session.state.read();
@@ -458,13 +489,14 @@ impl Render for ZenviView {
                 .size_0(),
             )
             // Keyboard input
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, _cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                this.trigger_interaction(cx);
                 #[cfg(not(target_os = "macos"))]
                 if this.is_menu_open {
                     let is_esc = event.keystroke.key == "escape" || event.keystroke.key == "Esc" || event.keystroke.key == "\u{1b}";
                     this.is_menu_open = false;
                     this.active_submenu = None;
-                    _cx.notify();
+                    cx.notify();
                     if is_esc {
                         return;
                     }

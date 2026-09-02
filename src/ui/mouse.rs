@@ -59,6 +59,7 @@ impl ZenviView {
             self.active_submenu = None;
         }
         window.focus(&self.focus_handle);
+        self.trigger_interaction(cx);
         let (col, row) = self.pos_to_grid(position);
         if button == "left" {
             self.is_mouse_down = true;
@@ -110,6 +111,7 @@ impl ZenviView {
         if !self.is_mouse_down {
             return;
         }
+        self.trigger_interaction(cx);
         let (col, row) = self.pos_to_grid(event.position);
         let effective_col = self.scrollbar_drag_col.unwrap_or(col);
 
@@ -117,7 +119,6 @@ impl ZenviView {
             return;
         }
         self.last_mouse_pos = Some((effective_col, row));
-        self.last_interaction_instant = Some(std::time::Instant::now());
 
         let now = std::time::Instant::now();
         let elapsed = now.duration_since(self.last_drag_instant);
@@ -140,10 +141,11 @@ impl ZenviView {
                         tokio::time::sleep(remaining).await;
                         let _ = cx.update(|cx| {
                             if let Some(entity) = this.upgrade() {
-                                entity.update(cx, |this, _cx| {
+                                entity.update(cx, |this, cx| {
                                     this._drag_task = None;
                                     if let Some((c, r, mods)) = this.pending_mouse_drag.take() {
                                         this.last_drag_instant = std::time::Instant::now();
+                                        this.trigger_interaction(cx);
                                         let mods_str = mods_to_nvim(&mods);
                                         this.session.send_mouse("left", "drag", mods_str, 0, r, c);
                                     }
@@ -158,8 +160,8 @@ impl ZenviView {
 
     /// Handles scroll wheel events, converting pixel or line deltas
     /// into discrete Neovim scroll commands with calibrated distance.
-    pub fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent) {
-        self.last_interaction_instant = Some(std::time::Instant::now());
+    pub fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        self.trigger_interaction(cx);
         let (col, row) = self.pos_to_grid(event.position);
         let mods = mods_to_nvim(&event.modifiers);
 
