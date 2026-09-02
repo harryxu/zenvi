@@ -325,6 +325,16 @@ impl Render for ZenviView {
             *guard = Some(now);
         }
 
+        static LAST_FRAME_INSTANT: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::Mutex::new(None);
+        {
+            let mut l_guard = LAST_FRAME_INSTANT.lock();
+            if let Some(prev) = *l_guard {
+                let dt = now.duration_since(prev);
+                eprintln!("[FRAME_INTERVAL] dt = {:.2}ms", dt.as_secs_f64() * 1000.0);
+            }
+            *l_guard = Some(now);
+        }
+
         // Active interaction animation loop (aligns with Neovide 60 FPS swapchain presentation):
         // While user is actively scrolling, dragging, or receiving redraws, pump frames at 60 FPS VSync.
         // Once interaction ceases for 250ms, automatically returns to 0 FPS silent idle.

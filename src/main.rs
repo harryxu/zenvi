@@ -15,6 +15,9 @@ pub use actions::*;
 use gpui::*;
 
 fn main() {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
     env_logger::init();
 
     // Start a multi-threaded tokio runtime for background Neovim IPC

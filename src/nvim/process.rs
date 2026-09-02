@@ -297,6 +297,15 @@ impl NvimSession {
                             } else {
                                 *guard = Some(now);
                             }
+                            static LAST_REDRAW_INSTANT: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::Mutex::new(None);
+                            {
+                                let mut l_guard = LAST_REDRAW_INSTANT.lock();
+                                if let Some(prev) = *l_guard {
+                                    let dt = now.duration_since(prev);
+                                    eprintln!("[REDRAW_INTERVAL] dt = {:.2}ms", dt.as_secs_f64() * 1000.0);
+                                }
+                                *l_guard = Some(now);
+                            }
 
                             let _ = event_tx_clone.send(NvimEvent::Redraw);
                         }
