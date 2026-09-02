@@ -112,6 +112,7 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) -> bool {
                         }
 
                         let mut current_hl = 0;
+                        let mut row_changed = false;
                         let row_slice = grid.row_mut(row);
                         for cell_val in cells {
                             if let Some(cell_info) = cell_val.as_array() {
@@ -138,13 +139,18 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) -> bool {
 
                                 for _ in 0..repeat {
                                     if col_start < row_slice.len() {
-                                        row_slice[col_start] = cell;
+                                        if row_slice[col_start] != cell {
+                                            row_slice[col_start] = cell;
+                                            row_changed = true;
+                                        }
                                         col_start += 1;
                                     }
                                 }
                             }
                         }
-                        grid.mark_row_dirty(row);
+                        if row_changed {
+                            grid.mark_row_dirty(row);
+                        }
                     }
                 }
             }
@@ -156,10 +162,8 @@ pub fn handle_redraw_event(state: &mut NvimState, event: &[Value]) -> bool {
 
                     state.active_grid = grid_id;
                     if let Some(grid) = state.grids.get_mut(&grid_id) {
-                        grid.mark_row_dirty(grid.cursor_row); // old cursor row
                         grid.cursor_row = row;
                         grid.cursor_col = col;
-                        grid.mark_row_dirty(row); // new cursor row
                     }
                 }
             }

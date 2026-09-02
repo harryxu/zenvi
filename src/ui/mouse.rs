@@ -154,7 +154,7 @@ impl ZenviView {
                     self.scroll_accum_y += step;
                     ticks -= 1;
                 }
-                self.scroll_accum_y = self.scroll_accum_y.clamp(-step * 2.0, step * 2.0);
+                self.scroll_accum_y = self.scroll_accum_y.clamp(-step * 5.0, step * 5.0);
             }
             ScrollDelta::Lines(l) => {
                 let lines = l.y;
@@ -163,17 +163,19 @@ impl ZenviView {
         }
 
         if ticks != 0 {
-            self.pending_wheel_ticks = (self.pending_wheel_ticks + ticks).clamp(-4, 4);
+            self.pending_wheel_ticks = (self.pending_wheel_ticks + ticks).clamp(-20, 20);
 
             if !self.wheel_scroll_in_flight {
+                let count = self.pending_wheel_ticks.abs().min(3);
+                let dir = if self.pending_wheel_ticks > 0 { "up" } else { "down" };
                 if self.pending_wheel_ticks > 0 {
-                    self.pending_wheel_ticks -= 1;
-                    self.wheel_scroll_in_flight = true;
-                    self.session.send_mouse("wheel", "up", mods, 0, row, col);
-                } else if self.pending_wheel_ticks < 0 {
-                    self.pending_wheel_ticks += 1;
-                    self.wheel_scroll_in_flight = true;
-                    self.session.send_mouse("wheel", "down", mods, 0, row, col);
+                    self.pending_wheel_ticks -= count;
+                } else {
+                    self.pending_wheel_ticks += count;
+                }
+                self.wheel_scroll_in_flight = true;
+                for _ in 0..count {
+                    self.session.send_mouse("wheel", dir, mods, 0, row, col);
                 }
             }
         }

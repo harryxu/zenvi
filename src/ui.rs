@@ -220,18 +220,21 @@ impl ZenviView {
                                     this.pending_mouse_drag = None;
                                 }
 
-                                // Backpressure dispatch for wheel scrolling
+                                // Backpressure dispatch for wheel scrolling (batch up to 3 ticks per cycle)
                                 this.wheel_scroll_in_flight = false;
-                                if this.pending_wheel_ticks > 0 {
-                                    this.pending_wheel_ticks -= 1;
+                                if this.pending_wheel_ticks != 0 {
+                                    let count = this.pending_wheel_ticks.abs().min(3);
+                                    let dir = if this.pending_wheel_ticks > 0 { "up" } else { "down" };
+                                    if this.pending_wheel_ticks > 0 {
+                                        this.pending_wheel_ticks -= count;
+                                    } else {
+                                        this.pending_wheel_ticks += count;
+                                    }
                                     this.wheel_scroll_in_flight = true;
                                     let (col, row) = this.last_wheel_pos;
-                                    this.session.send_mouse("wheel", "up", this.last_wheel_mods, 0, row, col);
-                                } else if this.pending_wheel_ticks < 0 {
-                                    this.pending_wheel_ticks += 1;
-                                    this.wheel_scroll_in_flight = true;
-                                    let (col, row) = this.last_wheel_pos;
-                                    this.session.send_mouse("wheel", "down", this.last_wheel_mods, 0, row, col);
+                                    for _ in 0..count {
+                                        this.session.send_mouse("wheel", dir, this.last_wheel_mods, 0, row, col);
+                                    }
                                 }
 
                                 cx.notify();
