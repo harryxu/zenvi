@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Zenvi
+Comment=GPU-accelerated Standalone Neovim GUI Shell
+Exec=zenvi %F
+Icon=zenvi
+Terminal=false
+Type=Application
+Categories=Development;TextEditor;Utility;
+MimeType=text/plain;text/x-chdr;text/x-csrc;text/x-c++hdr;text/x-c++src;text/x-java;text/x-dsrc;text/x-pascal;text/x-tcl;text/x-tex;application/x-shellscript;text/x-c;text/x-c++;
+StartupNotify=true
+StartupWMClass=zenvi

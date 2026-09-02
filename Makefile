@@ -2,4 +2,4 @@
 	macapp
 
 macapp:
-	./scripts/bundle_macos.sh
+	./packaging/macos/bundle_macos.sh
