@@ -99,8 +99,17 @@ pub struct HighlightAttr {
     pub blend: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScrollDelta {
+    pub top: usize,
+    pub bot: usize,
+    pub left: usize,
+    pub right: usize,
+    pub rows: i64,
+}
+
 /// Contiguous flat grid storage enabling zero-copy SIMD memmove row scrolling.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Grid {
     #[allow(dead_code)]
     pub id: u64,
@@ -112,6 +121,8 @@ pub struct Grid {
     /// Per-row version counters for lock-free incremental rendering.
     /// Incremented whenever a row is modified by grid_line, scroll, etc.
     pub row_versions: Vec<u32>,
+    /// Pending scroll deltas to be consumed by the UI render cache.
+    pub pending_scrolls: parking_lot::Mutex<Vec<ScrollDelta>>,
 }
 
 impl Grid {
@@ -126,6 +137,7 @@ impl Grid {
             cursor_row: 0,
             cursor_col: 0,
             row_versions: vec![1; height],
+            pending_scrolls: parking_lot::Mutex::new(Vec::new()),
         }
     }
 
@@ -197,6 +209,7 @@ impl Grid {
         self.height = height;
         self.cells = new_cells;
         self.row_versions = vec![1; height];
+        self.pending_scrolls.lock().clear();
     }
 
     pub fn clear(&mut self) {
@@ -204,6 +217,7 @@ impl Grid {
         for v in &mut self.row_versions {
             *v = v.wrapping_add(1);
         }
+        self.pending_scrolls.lock().clear();
     }
 
     /// Increments the version counter for a single row.
@@ -247,6 +261,9 @@ impl Grid {
                         self.cells[start..start + (right - left)].fill(Cell::default());
                     }
                 }
+                for r in top..bot {
+                    self.mark_row_dirty(r);
+                }
                 return;
             }
 
@@ -260,6 +277,22 @@ impl Grid {
                 let clear_start = (bot - count) * self.width;
                 let clear_end = bot * self.width;
                 self.cells[clear_start..clear_end].fill(Cell::default());
+
+                // Shift version counters for surviving rows
+                self.row_versions.copy_within((top + count)..bot, top);
+                // Mark only the newly vacated bottom rows dirty
+                for r in (bot - count)..bot {
+                    self.mark_row_dirty(r);
+                }
+
+                // Notify UI render cache to shift its cached row objects accordingly
+                self.pending_scrolls.lock().push(ScrollDelta {
+                    top,
+                    bot,
+                    left,
+                    right,
+                    rows,
+                });
             } else {
                 let len = right - left;
                 for r in top..(top + valid_rows) {
@@ -271,6 +304,9 @@ impl Grid {
                 for r in (bot - count)..bot {
                     let start = r * self.width + left;
                     self.cells[start..start + len].fill(Cell::default());
+                }
+                for r in top..bot {
+                    self.mark_row_dirty(r);
                 }
             }
         } else {
@@ -285,6 +321,9 @@ impl Grid {
                         self.cells[start..start + (right - left)].fill(Cell::default());
                     }
                 }
+                for r in top..bot {
+                    self.mark_row_dirty(r);
+                }
                 return;
             }
 
@@ -298,6 +337,22 @@ impl Grid {
                 let clear_start = top * self.width;
                 let clear_end = (top + count) * self.width;
                 self.cells[clear_start..clear_end].fill(Cell::default());
+
+                // Shift version counters for surviving rows
+                self.row_versions.copy_within(top..(top + valid_rows), top + count);
+                // Mark only the newly vacated top rows dirty
+                for r in top..(top + count) {
+                    self.mark_row_dirty(r);
+                }
+
+                // Notify UI render cache to shift its cached row objects accordingly
+                self.pending_scrolls.lock().push(ScrollDelta {
+                    top,
+                    bot,
+                    left,
+                    right,
+                    rows,
+                });
             } else {
                 let len = right - left;
                 for r in (top..top + valid_rows).rev() {
@@ -311,12 +366,10 @@ impl Grid {
                     let start = r * self.width + left;
                     self.cells[start..start + len].fill(Cell::default());
                 }
+                for r in top..bot {
+                    self.mark_row_dirty(r);
+                }
             }
-        }
-
-        // Mark all rows in the scroll region as dirty
-        for r in top..bot {
-            self.mark_row_dirty(r);
         }
     }
 }

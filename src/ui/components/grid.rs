@@ -38,6 +38,54 @@ impl GridRenderCache {
             self.row_versions.resize(height, 0);
         }
     }
+
+    /// Shifts cached rows in response to full-width grid_scroll events,
+    /// preserving pre-parsed strings and highlights for surviving rows.
+    pub fn scroll(&mut self, top: usize, bot: usize, rows: i64) {
+        let top = top.min(self.rows.len());
+        let bot = bot.min(self.rows.len());
+        if top >= bot || rows == 0 {
+            return;
+        }
+
+        if rows > 0 {
+            let count = rows as usize;
+            if count >= bot - top {
+                for r in top..bot {
+                    self.rows[r] = None;
+                    self.row_versions[r] = 0;
+                }
+                return;
+            }
+            let valid_rows = bot - top - count;
+            for i in 0..valid_rows {
+                self.rows[top + i] = self.rows[top + count + i].take();
+            }
+            self.row_versions.copy_within((top + count)..bot, top);
+            for r in (bot - count)..bot {
+                self.rows[r] = None;
+                self.row_versions[r] = 0;
+            }
+        } else {
+            let count = (-rows) as usize;
+            if count >= bot - top {
+                for r in top..bot {
+                    self.rows[r] = None;
+                    self.row_versions[r] = 0;
+                }
+                return;
+            }
+            let valid_rows = bot - top - count;
+            for i in (0..valid_rows).rev() {
+                self.rows[top + count + i] = self.rows[top + i].take();
+            }
+            self.row_versions.copy_within(top..(top + valid_rows), top + count);
+            for r in top..(top + count) {
+                self.rows[r] = None;
+                self.row_versions[r] = 0;
+            }
+        }
+    }
 }
 
 /// Builds cached row data from grid cells and highlight attributes.
@@ -203,6 +251,20 @@ pub fn render_grid(
     };
 
     cache.ensure_capacity(grid.height);
+
+    // Drain pending full-width scrolls and shift cached rows in-place
+    let pending_scrolls = std::mem::take(&mut *grid.pending_scrolls.lock());
+    for s in pending_scrolls {
+        if s.left == 0 && s.right == grid.width {
+            cache.scroll(s.top, s.bot, s.rows);
+        } else {
+            // For partial-width scrolls, invalidate affected cached rows
+            for r in s.top..s.bot.min(cache.rows.len()) {
+                cache.rows[r] = None;
+                cache.row_versions[r] = 0;
+            }
+        }
+    }
 
     let mut row_elements = Vec::with_capacity(grid.height);
 

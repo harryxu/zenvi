@@ -264,49 +264,57 @@ impl ZenviView {
     }
 
     /// Binds all mouse and scroll event handlers to the root element.
-    fn bind_mouse_handlers(root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
-        root.on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                this.handle_mouse_down("left", event.position, &event.modifiers, window);
-            }),
-        )
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                this.handle_mouse_down("right", event.position, &event.modifiers, window);
-            }),
-        )
-        .on_mouse_down(
-            MouseButton::Middle,
-            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
-                this.handle_mouse_down("middle", event.position, &event.modifiers, window);
-            }),
-        )
-        .on_mouse_up(
-            MouseButton::Left,
-            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                this.handle_mouse_up("left", event.position, &event.modifiers);
-            }),
-        )
-        .on_mouse_up(
-            MouseButton::Right,
-            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                this.handle_mouse_up("right", event.position, &event.modifiers);
-            }),
-        )
-        .on_mouse_up(
-            MouseButton::Middle,
-            cx.listener(|this, event: &MouseUpEvent, _window, _cx| {
-                this.handle_mouse_up("middle", event.position, &event.modifiers);
-            }),
-        )
-        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
-            this.handle_mouse_move(event, cx);
-        }))
-        .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
-            this.handle_scroll_wheel(event);
-        }))
+    fn bind_mouse_handlers(&self, root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+        let root = root
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    this.handle_mouse_down("left", event.position, &event.modifiers, window, cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    this.handle_mouse_down("right", event.position, &event.modifiers, window, cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    this.handle_mouse_down("middle", event.position, &event.modifiers, window, cx);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseUpEvent, _window, cx| {
+                    this.handle_mouse_up("left", event.position, &event.modifiers, cx);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseUpEvent, _window, cx| {
+                    this.handle_mouse_up("right", event.position, &event.modifiers, cx);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(|this, event: &MouseUpEvent, _window, cx| {
+                    this.handle_mouse_up("middle", event.position, &event.modifiers, cx);
+                }),
+            )
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
+                this.handle_scroll_wheel(event);
+            }));
+
+        // Dynamically bind on_mouse_move ONLY when left button is held down (dragging).
+        // During normal cursor hovering, omits the listener entirely to guarantee 0 FPS idle rendering.
+        if self.is_mouse_down {
+            root.on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                this.handle_mouse_move(event, cx);
+            }))
+        } else {
+            root
+        }
     }
 }
 
@@ -486,7 +494,7 @@ impl Render for ZenviView {
             inner
         };
 
-        let inner = Self::bind_mouse_handlers(inner, cx);
+        let inner = self.bind_mouse_handlers(inner, cx);
 
         if self.borderless && !is_maximized {
             div()

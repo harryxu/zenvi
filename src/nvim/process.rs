@@ -284,7 +284,11 @@ impl NvimSession {
                         }
 
                         if last_pos > 0 {
-                            buffer.drain(..last_pos);
+                            if last_pos >= buffer.len() {
+                                buffer.clear();
+                            } else {
+                                buffer.drain(..last_pos);
+                            }
                         }
                     }
                     Err(_) => {

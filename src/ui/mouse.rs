@@ -51,6 +51,7 @@ impl ZenviView {
         position: Point<Pixels>,
         modifiers: &Modifiers,
         window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         #[cfg(not(target_os = "macos"))]
         {
@@ -62,6 +63,7 @@ impl ZenviView {
         if button == "left" {
             self.is_mouse_down = true;
             self.last_mouse_pos = Some((col, row));
+            cx.notify(); // Re-render to dynamically attach on_mouse_move listener
         }
         let mods = mods_to_nvim(modifiers);
         self.session
@@ -75,12 +77,14 @@ impl ZenviView {
         button: &str,
         position: Point<Pixels>,
         modifiers: &Modifiers,
+        cx: &mut Context<Self>,
     ) {
         if button == "left" {
             self.is_mouse_down = false;
             self.last_mouse_pos = None;
             self._drag_task = None;
             self.pending_mouse_drag = None;
+            cx.notify(); // Re-render to detach on_mouse_move listener
         }
         let (col, row) = self.pos_to_grid(position);
         let mods = mods_to_nvim(modifiers);
@@ -90,23 +94,29 @@ impl ZenviView {
 
     /// Handles mouse drag when left button is held down.
     pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
-        if self.is_mouse_down {
-            let (col, row) = self.pos_to_grid(event.position);
-            // Deduplicate: only send RPC drag event to Neovim when the grid cell changes
-            if self.last_mouse_pos != Some((col, row)) {
-                self.last_mouse_pos = Some((col, row));
-                let mods = mods_to_nvim(&event.modifiers);
+        if !self.is_mouse_down {
+            return;
+        }
+        let (col, row) = self.pos_to_grid(event.position);
+        // Deduplicate: only send RPC drag event to Neovim when the grid cell changes
+        if self.last_mouse_pos != Some((col, row)) {
+            self.last_mouse_pos = Some((col, row));
+            let mods = mods_to_nvim(&event.modifiers);
 
-                let now = std::time::Instant::now();
-                let elapsed = now.duration_since(self.last_mouse_drag_instant);
-                // 8ms throttling (~125 drag updates/sec) prevents flooding Neovim with intermediate scrollbar jumps
-                if elapsed >= std::time::Duration::from_millis(8) {
-                    self.last_mouse_drag_instant = now;
-                    self.pending_mouse_drag = None;
-                    self.session
-                        .send_mouse("left", "drag", mods, 0, row, col);
-                } else {
-                    self.pending_mouse_drag = Some((mods, row, col));
+            let now = std::time::Instant::now();
+            let elapsed = now.duration_since(self.last_mouse_drag_instant);
+            // 8ms throttling (~125 drag updates/sec) prevents flooding Neovim with intermediate scrollbar jumps
+            if elapsed >= std::time::Duration::from_millis(8) {
+                self.last_mouse_drag_instant = now;
+                self.pending_mouse_drag = None;
+                self.session
+                    .send_mouse("left", "drag", mods, 0, row, col);
+            } else {
+                self.pending_mouse_drag = Some((mods, row, col));
+                // Only spawn a trailing task if there isn't one already running.
+                // Preserving the existing task prevents task starvation / timer cancellation
+                // during rapid mouse dragging.
+                if self._drag_task.is_none() {
                     let remaining = std::time::Duration::from_millis(8).saturating_sub(elapsed);
                     self._drag_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
                         let cx = cx.clone();
@@ -115,6 +125,7 @@ impl ZenviView {
                             let _ = cx.update(|cx| {
                                 if let Some(entity) = this.upgrade() {
                                     entity.update(cx, |this, _cx| {
+                                        this._drag_task = None;
                                         if this.is_mouse_down {
                                             if let Some((mods, r, c)) = this.pending_mouse_drag.take() {
                                                 this.last_mouse_drag_instant = std::time::Instant::now();
