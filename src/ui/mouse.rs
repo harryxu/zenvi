@@ -111,6 +111,7 @@ impl ZenviView {
 
         if should_update {
             self.last_mouse_pos = Some((col, row));
+            self.last_interaction_instant = Some(std::time::Instant::now());
             let mods = mods_to_nvim(&event.modifiers);
             self.session
                 .send_mouse("left", "drag", mods, 0, row, col);
@@ -120,6 +121,7 @@ impl ZenviView {
     /// Handles scroll wheel events, converting pixel or line deltas
     /// into discrete Neovim scroll commands with calibrated distance.
     pub fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent) {
+        self.last_interaction_instant = Some(std::time::Instant::now());
         let (col, row) = self.pos_to_grid(event.position);
         let mods = mods_to_nvim(&event.modifiers);
 

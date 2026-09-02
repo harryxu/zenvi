@@ -54,6 +54,7 @@ pub struct ZenviView {
     pub(crate) _resize_task: Option<Task<()>>,
     pub(crate) _drag_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
+    pub last_interaction_instant: Option<std::time::Instant>,
     /// Persistent render cache for incremental grid rendering (dirty-row tracking).
     pub grid_cache: components::grid::GridRenderCache,
 }
@@ -154,6 +155,7 @@ impl ZenviView {
             _resize_task: None,
             _drag_task: None,
             _event_task: Some(event_task),
+            last_interaction_instant: None,
             grid_cache: components::grid::GridRenderCache::new(),
         }
     }
@@ -174,7 +176,8 @@ impl ZenviView {
                                 break;
                             };
                             if entity
-                                .update(&mut cx, |_this, cx| {
+                                .update(&mut cx, |this, cx| {
+                                    this.last_interaction_instant = Some(std::time::Instant::now());
                                     cx.notify();
                                 })
                                 .is_err()
@@ -320,6 +323,17 @@ impl Render for ZenviView {
             }
         } else {
             *guard = Some(now);
+        }
+
+        // Active interaction animation loop (aligns with Neovide 60 FPS swapchain presentation):
+        // While user is actively scrolling, dragging, or receiving redraws, pump frames at 60 FPS VSync.
+        // Once interaction ceases for 250ms, automatically returns to 0 FPS silent idle.
+        if let Some(t) = self.last_interaction_instant {
+            if t.elapsed() < std::time::Duration::from_millis(250) {
+                window.request_animation_frame();
+            } else {
+                self.last_interaction_instant = None;
+            }
         }
 
         // Read Neovim state once for the entire render pass
