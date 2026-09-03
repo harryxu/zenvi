@@ -88,6 +88,8 @@ pub struct GridRenderCache {
     pub last_cursor_col: usize,
     pub cached_font_size: Pixels,
     pub cached_font_family: String,
+    pub cached_width: usize,
+    pub cached_height: usize,
     /// Content-addressable line cache: stores pre-shaped lines indexed by their cell hash.
     /// Eliminates HarfBuzz font shaping when scrolling past previously seen lines.
     pub content_cache: HashMap<u64, ShapedLine>,
@@ -102,15 +104,23 @@ impl GridRenderCache {
             last_cursor_col: usize::MAX,
             cached_font_size: px(0.0),
             cached_font_family: String::new(),
+            cached_width: 0,
+            cached_height: 0,
             content_cache: HashMap::with_capacity(1024),
         }
     }
 
-    /// Ensures the cache has enough slots for the given grid height.
-    fn ensure_capacity(&mut self, height: usize) {
-        if self.rows.len() != height {
+    /// Ensures cache dimensions match the current grid width and height.
+    /// If width or height changed, invalidates row cache so lines are re-shaped for the new layout.
+    fn check_dimensions(&mut self, width: usize, height: usize) {
+        if self.cached_width != width || self.cached_height != height {
+            self.cached_width = width;
+            self.cached_height = height;
+            self.rows.clear();
             self.rows.resize(height, None);
+            self.row_versions.clear();
             self.row_versions.resize(height, 0);
+            self.content_cache.clear();
         }
     }
 
@@ -397,7 +407,7 @@ pub fn render_grid(
     };
 
     cache.check_font(font_family, font_size);
-    cache.ensure_capacity(grid.height);
+    cache.check_dimensions(grid.width, grid.height);
 
     let font_variants = FontVariants {
         regular: default_style.font(),

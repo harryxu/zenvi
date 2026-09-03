@@ -40,37 +40,9 @@ You can also change fonts dynamically at runtime inside Neovim:
 :set guifont=Fira_Code:h16
 ```
 
----
+### Other options
 
-## 🛠️ Requirements
+#### `vim.opt.zenvi_prewarm_max_lines`
 
-- **Rust**: 1.98.0+ (`cargo`, `rustc`)
-- **Neovim**: `nvim` installed and available in `$PATH`
-- **macOS**: Xcode Metal Toolchain (if building on macOS)
+Pre-warms all off-screen lines into Zenvi's 64-bit FNV-1a content_cache, once per buffer when opening files <= zenvi_prewarm_max_lines (default 1000), set `0` to disable pre-warming.
 
----
-
-## 🏃 Running Zenvi
-
-```bash
-cd /Users/harry/dev/zenvi
-cargo run
-```
-
-To build a release build:
-```bash
-cargo build --release
-./target/release/zenvi
-```
-
-### 📦 Packaging macOS Desktop App (`Zenvi.app`)
-
-Zenvi includes an automated packaging pipeline with high-resolution Retina icons (`AppIcon.icns`):
-
-```bash
-# Package Zenvi.app into target/Zenvi.app
-bash scripts/bundle_macos.sh
-
-# Open the packaged standalone app
-open target/Zenvi.app
-```
