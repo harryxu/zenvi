@@ -1,6 +1,5 @@
 use super::{ZenviView, GRID_PADDING_LEFT, TOP_OFFSET};
 use gpui::*;
-use std::sync::Arc;
 
 /// Converts GPUI modifier flags to Neovim modifier string (e.g. "CS" for Ctrl+Shift)
 /// without any heap allocations.
@@ -65,7 +64,7 @@ impl ZenviView {
         if button == "left" {
             self.is_mouse_down = true;
             self.last_mouse_pos = Some((col, row));
-            self.is_drag_in_flight = false;
+            self.last_drag_instant = std::time::Instant::now();
             self.pending_mouse_drag = None;
             self._drag_task = None;
             // When clicking the right border scrollbar, lock the drag column to this position.
@@ -102,7 +101,6 @@ impl ZenviView {
             self.is_mouse_down = false;
             self.last_mouse_pos = None;
             self.pending_mouse_drag = None;
-            self.is_drag_in_flight = false;
             self._drag_task = None;
             cx.notify(); // Re-render to detach on_mouse_move listener
         }
@@ -112,14 +110,13 @@ impl ZenviView {
     }
 
     /// Handles mouse drag when left button is held down.
-    /// Implements closed-loop in-flight backpressure and latest-coordinate coalescing:
-    /// Never floods Neovim with more than 1 pending drag request at a time.
+    /// Uses 16ms (60 Hz) timer throttling and latest-coordinate coalescing via asynchronous Notification.
+    /// Eliminates request-response roundtrip lag while preventing Neovim input queue flooding.
     pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if !self.is_mouse_down {
             return;
         }
         self.trigger_interaction();
-        cx.notify();
         let (col, row) = self.pos_to_grid(event.position);
         let effective_col = self.scrollbar_drag_col.unwrap_or(col);
 
@@ -128,50 +125,44 @@ impl ZenviView {
         }
         self.last_mouse_pos = Some((effective_col, row));
 
-        if self.is_drag_in_flight {
-            // Neovim is still processing previous drag: buffer the freshest coordinate
-            self.pending_mouse_drag = Some((effective_col, row, event.modifiers.clone()));
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.last_drag_instant);
+        let throttle_interval = std::time::Duration::from_millis(16); // 60 Hz rate limit
+
+        if elapsed >= throttle_interval {
+            self.last_drag_instant = now;
+            self.pending_mouse_drag = None;
+            self._drag_task = None;
+            let mods = mods_to_nvim(&event.modifiers);
+            self.session
+                .send_mouse("left", "drag", mods, 0, row, effective_col);
         } else {
-            // Dispatch immediately with backpressure tracking
-            self.dispatch_mouse_drag(effective_col, row, &event.modifiers, cx);
-        }
-    }
-
-    /// Dispatches a mouse drag request to Neovim and awaits its response before sending the next buffered drag.
-    pub fn dispatch_mouse_drag(
-        &mut self,
-        col: usize,
-        row: usize,
-        modifiers: &Modifiers,
-        cx: &mut Context<Self>,
-    ) {
-        self.is_drag_in_flight = true;
-        self.pending_mouse_drag = None;
-        let mods = mods_to_nvim(modifiers);
-        let session = Arc::clone(&self.session);
-
-        self._drag_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let cx = cx.clone();
-            async move {
-                let _ = session
-                    .request_mouse("left", "drag", mods, 0, row, col)
-                    .await;
-
-                let _ = cx.update(|cx| {
-                    if let Some(entity) = this.upgrade() {
-                        entity.update(cx, |this, cx| {
-                            this.is_drag_in_flight = false;
-                            this._drag_task = None;
-                            if this.is_mouse_down {
-                                if let Some((c, r, m)) = this.pending_mouse_drag.take() {
-                                    this.dispatch_mouse_drag(c, r, &m, cx);
-                                }
+            self.pending_mouse_drag = Some((effective_col, row, event.modifiers.clone()));
+            if self._drag_task.is_none() {
+                let remaining = throttle_interval.saturating_sub(elapsed);
+                self._drag_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                    let cx = cx.clone();
+                    async move {
+                        tokio::time::sleep(remaining).await;
+                        let _ = cx.update(|cx| {
+                            if let Some(entity) = this.upgrade() {
+                                entity.update(cx, |this, _cx| {
+                                    this._drag_task = None;
+                                    if this.is_mouse_down {
+                                        if let Some((c, r, m)) = this.pending_mouse_drag.take() {
+                                            this.last_drag_instant = std::time::Instant::now();
+                                            let mods = mods_to_nvim(&m);
+                                            this.session
+                                                .send_mouse("left", "drag", mods, 0, r, c);
+                                        }
+                                    }
+                                });
                             }
                         });
                     }
-                });
+                }));
             }
-        }));
+        }
     }
 
     /// Handles scroll wheel events, converting pixel or line deltas

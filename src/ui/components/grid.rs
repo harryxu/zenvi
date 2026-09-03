@@ -1,24 +1,24 @@
 use crate::nvim::state::{Grid, NvimState};
 use gpui::*;
-use std::ops::Range;
 
-/// Cached row data for incremental rendering. When a row is not dirty,
-/// we reuse the cached text and highlights instead of re-processing all cells.
+/// Cached pre-shaped row for GPU Canvas direct rendering.
+/// Survives across frames and linegrid scrolls.
 #[derive(Clone)]
 pub struct CachedRow {
-    pub line_text: SharedString,
-    pub highlights: Vec<(Range<usize>, HighlightStyle)>,
+    pub shaped_line: ShapedLine,
     pub is_empty: bool,
 }
 
 /// Persistent render cache that survives across frames.
 /// Only dirty rows (where grid.row_versions[i] != cache.row_versions[i]) are recomputed;
-/// clean rows reuse cached StyledText and highlight data.
+/// clean rows reuse pre-shaped GPU lines.
 pub struct GridRenderCache {
     pub rows: Vec<Option<CachedRow>>,
     pub row_versions: Vec<u32>,
     pub last_cursor_row: usize,
     pub last_cursor_col: usize,
+    pub cached_font_size: Pixels,
+    pub cached_font_family: String,
 }
 
 impl GridRenderCache {
@@ -28,6 +28,8 @@ impl GridRenderCache {
             row_versions: Vec::new(),
             last_cursor_row: usize::MAX,
             last_cursor_col: usize::MAX,
+            cached_font_size: px(0.0),
+            cached_font_family: String::new(),
         }
     }
 
@@ -39,8 +41,18 @@ impl GridRenderCache {
         }
     }
 
-    /// Shifts cached rows in response to full-width grid_scroll events,
-    /// preserving pre-parsed strings and highlights for surviving rows.
+    /// Checks if font configuration changed and resets cache if necessary.
+    fn check_font(&mut self, font_family: &str, font_size: Pixels) {
+        if self.cached_font_size != font_size || self.cached_font_family != font_family {
+            self.rows.clear();
+            self.row_versions.clear();
+            self.cached_font_size = font_size;
+            self.cached_font_family = font_family.to_string();
+        }
+    }
+
+    /// Shifts cached rows in response to full-width or near full-width grid_scroll events,
+    /// preserving pre-shaped GPU lines for surviving rows.
     pub fn scroll(&mut self, top: usize, bot: usize, rows: i64) {
         let top = top.min(self.rows.len());
         let bot = bot.min(self.rows.len());
@@ -88,20 +100,24 @@ impl GridRenderCache {
     }
 }
 
-/// Builds cached row data from grid cells and highlight attributes.
+/// Builds pre-shaped row data from grid cells and highlight attributes,
+/// ready for direct GPU canvas painting.
 fn build_cached_row(
     row: &[crate::nvim::state::Cell],
     state: &NvimState,
-    default_fg: u32,
-    default_bg: u32,
+    default_style: &TextStyle,
+    window: &mut Window,
+    font_size: Pixels,
 ) -> CachedRow {
+    let default_fg = state.default_fg;
+    let default_bg = state.default_bg;
+
     // Find the rightmost cell that has content or non-default styling
     let last_content_col = row.iter().rposition(|cell| {
         let s = cell.text_str();
         if s != " " && !s.is_empty() {
             return true;
         }
-        // Fast-path: hl_id 0 is always default, skip lookup
         if cell.hl_id == 0 {
             return false;
         }
@@ -116,16 +132,14 @@ fn build_cached_row(
 
     let Some(last_col) = last_content_col else {
         return CachedRow {
-            line_text: SharedString::default(),
-            highlights: Vec::new(),
+            shaped_line: ShapedLine::default(),
             is_empty: true,
         };
     };
 
     let visible_cells = &row[..=last_col];
     let mut line_text = String::with_capacity(visible_cells.len() * 2);
-    let mut highlights: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
-    let mut current_override: Option<(usize, usize, HighlightStyle)> = None;
+    let mut runs: Vec<TextRun> = Vec::new();
 
     for cell in visible_cells {
         let text = cell.text_str();
@@ -133,98 +147,78 @@ fn build_cached_row(
             continue;
         }
 
-        let start_byte = line_text.len();
-        if text.is_empty() {
-            line_text.push(' ');
-        } else {
-            line_text.push_str(text);
-        }
-        let end_byte = line_text.len();
+        let char_str = if text.is_empty() { " " } else { text };
+        let char_bytes = char_str.len();
+        line_text.push_str(char_str);
 
-        let override_style = if cell.hl_id == 0 {
-            None
-        } else if let Some(attr) = state.get_highlight(cell.hl_id) {
-            let mut fg = attr.foreground.unwrap_or(default_fg);
-            let mut bg = attr.background.unwrap_or(default_bg);
-            if attr.reverse {
-                std::mem::swap(&mut fg, &mut bg);
-            }
+        // Resolve style for this cell
+        let mut font = default_style.font();
+        let mut fg = default_fg;
+        let mut bg = default_bg;
+        let mut underline = None;
 
-            let is_non_default = fg != default_fg
-                || bg != default_bg
-                || attr.reverse
-                || attr.bold
-                || attr.italic
-                || attr.underline
-                || attr.undercurl;
-
-            if is_non_default {
-                let underline_style = if attr.underline || attr.undercurl {
-                    Some(UnderlineStyle {
+        if cell.hl_id != 0 {
+            if let Some(attr) = state.get_highlight(cell.hl_id) {
+                fg = attr.foreground.unwrap_or(default_fg);
+                bg = attr.background.unwrap_or(default_bg);
+                if attr.reverse {
+                    std::mem::swap(&mut fg, &mut bg);
+                }
+                if attr.bold {
+                    font = font.bold();
+                }
+                if attr.italic {
+                    font = font.italic();
+                }
+                if attr.underline || attr.undercurl {
+                    underline = Some(UnderlineStyle {
                         color: Some(rgb(fg).into()),
                         thickness: px(1.0),
                         wavy: attr.undercurl,
-                    })
-                } else {
-                    None
-                };
-
-                Some(HighlightStyle {
-                    color: if fg != default_fg {
-                        Some(rgb(fg).into())
-                    } else {
-                        None
-                    },
-                    background_color: if bg != default_bg {
-                        Some(rgb(bg).into())
-                    } else {
-                        None
-                    },
-                    font_weight: if attr.bold {
-                        Some(FontWeight::BOLD)
-                    } else {
-                        None
-                    },
-                    font_style: if attr.italic {
-                        Some(FontStyle::Italic)
-                    } else {
-                        None
-                    },
-                    underline: underline_style,
-                    ..Default::default()
-                })
-            } else {
-                None
+                    });
+                }
             }
+        }
+
+        let color = rgb(fg).into();
+        let background_color = if bg != default_bg {
+            Some(rgb(bg).into())
         } else {
             None
         };
 
-        if let Some(style) = override_style {
-            if let Some((s_start, s_end, ref s_style)) = current_override {
-                if *s_style == style && s_end == start_byte {
-                    current_override = Some((s_start, end_byte, style));
-                } else {
-                    highlights.push((s_start..s_end, s_style.clone()));
-                    current_override = Some((start_byte, end_byte, style));
-                }
-            } else {
-                current_override = Some((start_byte, end_byte, style));
-            }
-        } else {
-            if let Some((s_start, s_end, s_style)) = current_override.take() {
-                highlights.push((s_start..s_end, s_style));
+        // Try to coalesce with previous run if identical styling
+        if let Some(last_run) = runs.last_mut() {
+            if last_run.font == font
+                && last_run.color == color
+                && last_run.background_color == background_color
+                && last_run.underline == underline
+                && last_run.strikethrough.is_none()
+            {
+                last_run.len += char_bytes;
+                continue;
             }
         }
+
+        runs.push(TextRun {
+            len: char_bytes,
+            font,
+            color,
+            background_color,
+            underline,
+            strikethrough: None,
+        });
     }
 
-    if let Some((s_start, s_end, s_style)) = current_override.take() {
-        highlights.push((s_start..s_end, s_style));
-    }
+    let shaped_line = window.text_system().shape_line(
+        SharedString::from(line_text),
+        font_size,
+        &runs,
+        None,
+    );
 
     CachedRow {
-        line_text: SharedString::from(line_text),
-        highlights,
+        shaped_line,
         is_empty: false,
     }
 }
@@ -238,6 +232,7 @@ pub fn render_grid(
     char_width: f32,
     cache: &mut GridRenderCache,
     smooth_cursor_pos: Option<(f32, f32)>,
+    window: &mut Window,
 ) -> impl IntoElement {
     let default_fg = state.default_fg;
     let default_bg = state.default_bg;
@@ -251,15 +246,16 @@ pub fn render_grid(
         ..Default::default()
     };
 
+    cache.check_font(font_family, font_size);
     cache.ensure_capacity(grid.height);
 
-    // Drain pending full-width scrolls and shift cached rows in-place
+    // Drain pending scrolls and shift cached pre-shaped rows in-place
     let pending_scrolls = std::mem::take(&mut *grid.pending_scrolls.lock());
     for s in pending_scrolls {
-        if s.left == 0 && s.right == grid.width {
+        if s.left == 0 && s.right >= grid.width.saturating_sub(2) {
             cache.scroll(s.top, s.bot, s.rows);
         } else {
-            // For partial-width scrolls, invalidate affected cached rows
+            // For other partial-width scrolls, invalidate affected cached rows
             for r in s.top..s.bot.min(cache.rows.len()) {
                 cache.rows[r] = None;
                 cache.row_versions[r] = 0;
@@ -267,46 +263,22 @@ pub fn render_grid(
         }
     }
 
-    let mut row_elements = Vec::with_capacity(grid.height);
-
+    // Re-shape only dirty rows
     for (row_idx, row) in grid.rows().enumerate() {
         let grid_ver = grid.row_versions.get(row_idx).copied().unwrap_or(0);
         let cache_ver = cache.row_versions.get(row_idx).copied().unwrap_or(0);
         let is_dirty = grid_ver != cache_ver || cache.rows.get(row_idx).map_or(true, |c| c.is_none());
 
-        // Rebuild cached data only for dirty rows
         if is_dirty {
-            let cached = build_cached_row(row, state, default_fg, default_bg);
+            let cached = build_cached_row(row, state, &default_style, window, font_size);
             if row_idx < cache.rows.len() {
                 cache.rows[row_idx] = Some(cached);
                 cache.row_versions[row_idx] = grid_ver;
             }
         }
-
-        // Use cached data to build the element
-        let cached = cache.rows.get(row_idx).and_then(|c| c.as_ref());
-
-        if let Some(cached_row) = cached {
-            if cached_row.is_empty {
-                row_elements.push(div().h(line_height).w_full());
-            } else {
-                row_elements.push(
-                    div()
-                        .h(line_height)
-                        .w_full()
-                        .overflow_hidden()
-                        .child(
-                            StyledText::new(cached_row.line_text.clone())
-                                .with_default_highlights(&default_style, cached_row.highlights.clone()),
-                        ),
-                );
-            }
-        } else {
-            row_elements.push(div().h(line_height).w_full());
-        }
     }
 
-    // Floating Cursor Overlay: Decoupled from line text layout to eliminate subpixel text jitter
+    // Floating Cursor Overlay
     let cursor_row = grid.cursor_row;
     let cursor_col = grid.cursor_col;
     let lh_f32: f32 = line_height.into();
@@ -330,7 +302,6 @@ pub fn render_grid(
     let cursor_cell_width = cell_under_cursor.map(|c| c.width.max(1)).unwrap_or(1);
     let cursor_w = char_width * cursor_cell_width as f32;
 
-    // Use mode_idx for O(1) lookup instead of linear search
     let cursor_shape = state
         .mode_info
         .get(state.current_mode_idx)
@@ -371,18 +342,52 @@ pub fn render_grid(
         }
     };
 
-    // Track cursor position for dirty detection
     cache.last_cursor_row = cursor_row;
     cache.last_cursor_col = cursor_col;
 
+    // Snapshot pre-shaped lines for GPU Canvas drawing
+    let cached_rows: Vec<Option<ShapedLine>> = cache
+        .rows
+        .iter()
+        .map(|r| {
+            r.as_ref().and_then(|c| {
+                if c.is_empty {
+                    None
+                } else {
+                    Some(c.shaped_line.clone())
+                }
+            })
+        })
+        .collect();
+
     div()
         .relative()
-        .flex()
-        .flex_col()
-        .w_full()
+        .size_full()
+        .overflow_hidden()
         .font_family(font_family.to_string())
         .text_size(font_size)
         .line_height(line_height)
-        .children(row_elements)
+        .child(
+            canvas(
+                move |_bounds, _window, _cx| (),
+                move |bounds, (), window, cx| {
+                    // Fill grid background
+                    window.paint_quad(fill(bounds, rgb(default_bg)));
+
+                    // Direct GPU draw calls for all pre-shaped rows
+                    for (r, maybe_shaped) in cached_rows.into_iter().enumerate() {
+                        if let Some(shaped) = maybe_shaped {
+                            let origin = Point::new(
+                                bounds.left(),
+                                bounds.top() + px(r as f32 * lh_f32),
+                            );
+                            let _ = shaped.paint_background(origin, line_height, window, cx);
+                            let _ = shaped.paint(origin, line_height, window, cx);
+                        }
+                    }
+                },
+            )
+            .size_full(),
+        )
         .child(cursor_element)
 }

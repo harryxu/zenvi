@@ -248,6 +248,7 @@ impl Grid {
         }
 
         let is_full_width = left == 0 && right == self.width;
+        let is_near_full_width = left == 0 && right >= self.width.saturating_sub(2);
 
         if rows > 0 {
             let count = rows as usize;
@@ -286,6 +287,29 @@ impl Grid {
                 }
 
                 // Notify UI render cache to shift its cached row objects accordingly
+                self.pending_scrolls.lock().push(ScrollDelta {
+                    top,
+                    bot,
+                    left,
+                    right,
+                    rows,
+                });
+            } else if is_near_full_width {
+                let len = right - left;
+                for r in top..(top + valid_rows) {
+                    let src_r = r + count;
+                    let src_start = src_r * self.width + left;
+                    let dst_start = r * self.width + left;
+                    self.cells.copy_within(src_start..src_start + len, dst_start);
+                }
+                for r in (bot - count)..bot {
+                    let start = r * self.width + left;
+                    self.cells[start..start + len].fill(Cell::default());
+                }
+                self.row_versions.copy_within((top + count)..bot, top);
+                for r in (bot - count)..bot {
+                    self.mark_row_dirty(r);
+                }
                 self.pending_scrolls.lock().push(ScrollDelta {
                     top,
                     bot,
@@ -346,6 +370,30 @@ impl Grid {
                 }
 
                 // Notify UI render cache to shift its cached row objects accordingly
+                self.pending_scrolls.lock().push(ScrollDelta {
+                    top,
+                    bot,
+                    left,
+                    right,
+                    rows,
+                });
+            } else if is_near_full_width {
+                let len = right - left;
+                for r in (top..top + valid_rows).rev() {
+                    let src_r = r;
+                    let dst_r = r + count;
+                    let src_start = src_r * self.width + left;
+                    let dst_start = dst_r * self.width + left;
+                    self.cells.copy_within(src_start..src_start + len, dst_start);
+                }
+                for r in top..(top + count) {
+                    let start = r * self.width + left;
+                    self.cells[start..start + len].fill(Cell::default());
+                }
+                self.row_versions.copy_within(top..(top + valid_rows), top + count);
+                for r in top..(top + count) {
+                    self.mark_row_dirty(r);
+                }
                 self.pending_scrolls.lock().push(ScrollDelta {
                     top,
                     bot,

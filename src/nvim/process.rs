@@ -429,6 +429,7 @@ impl NvimSession {
         let _ = self.tx.send(msg.into_value());
     }
 
+    #[allow(dead_code)]
     pub async fn request_mouse(
         &self,
         button: &str,

@@ -56,7 +56,7 @@ pub struct ZenviView {
     pub(crate) _event_task: Option<Task<()>>,
     pub last_interaction_instant: Option<std::time::Instant>,
     pub pending_mouse_drag: Option<(usize, usize, Modifiers)>,
-    pub is_drag_in_flight: bool,
+    pub last_drag_instant: std::time::Instant,
     pub scrollbar_drag_col: Option<usize>,
     /// Persistent render cache for incremental grid rendering (dirty-row tracking).
     pub grid_cache: components::grid::GridRenderCache,
@@ -160,7 +160,7 @@ impl ZenviView {
             _event_task: Some(event_task),
             last_interaction_instant: None,
             pending_mouse_drag: None,
-            is_drag_in_flight: false,
+            last_drag_instant: std::time::Instant::now(),
             scrollbar_drag_col: None,
             grid_cache: components::grid::GridRenderCache::new(),
         }
@@ -400,23 +400,6 @@ impl Render for ZenviView {
             }
         }
 
-        // Keep active 60 FPS presentation loop while mouse is dragging or during user interaction
-        let is_animating = self.is_mouse_down
-            || self.last_interaction_instant.map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
-
-        if is_animating {
-            let entity = cx.entity().downgrade();
-            window.on_next_frame(move |_, cx| {
-                if let Some(entity) = entity.upgrade() {
-                    entity.update(cx, |_, cx| {
-                        cx.notify();
-                    });
-                }
-            });
-        } else {
-            self.last_interaction_instant = None;
-        }
-
         let grid_element = components::grid::render_grid(
             &state,
             grid,
@@ -426,6 +409,7 @@ impl Render for ZenviView {
             self.char_width,
             &mut self.grid_cache,
             None,
+            window,
         );
 
         let focus_handle = self.focus_handle.clone();
