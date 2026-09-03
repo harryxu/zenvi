@@ -225,7 +225,10 @@ impl Grid {
         self.width = width;
         self.height = height;
         self.cells = new_cells;
-        self.row_versions = vec![1; height];
+        self.row_versions.resize(height, 0);
+        for v in &mut self.row_versions {
+            *v = v.wrapping_add(1);
+        }
         self.pending_scrolls.lock().clear();
     }
 

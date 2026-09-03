@@ -67,7 +67,6 @@ pub struct ZenviView {
     pub last_window_title: String,
     pub last_applied_shadow_size: f32,
     pub last_resize_instant: std::time::Instant,
-    pub pending_resize: Option<(usize, usize)>,
     pub(crate) _resize_task: Option<Task<()>>,
     pub(crate) _drag_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
@@ -174,7 +173,6 @@ impl ZenviView {
             last_window_title: String::new(),
             last_applied_shadow_size: -1.0,
             last_resize_instant: std::time::Instant::now(),
-            pending_resize: None,
             _resize_task: None,
             _drag_task: None,
             _event_task: Some(event_task),
@@ -377,7 +375,7 @@ impl Render for ZenviView {
             .or_else(|| state.grids.get(&state.active_grid))
             .unwrap_or(&default_grid);
 
-        // Calculate grid dimensions and notify Neovim of resize with 25ms throttling
+        // Calculate grid dimensions and notify Neovim of resize
         let viewport = window.viewport_size();
         let window_w: f32 = viewport.width.into();
         let window_h: f32 = viewport.height.into();
@@ -391,19 +389,23 @@ impl Render for ZenviView {
             .max(20.0) as usize;
         let rows = ((content_h - TOP_OFFSET) / lh).floor().max(5.0) as usize;
 
+        // Notify Neovim of resize with 30ms throttling (Leading + Trailing edge)
+        // Prevents flooding Neovim with full-screen layout recalculations during rapid drags,
+        // while guaranteeing the final window size is dispatched when resizing stops.
         if cols != self.last_cols || rows != self.last_rows {
-            self.last_cols = cols;
-            self.last_rows = rows;
-
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(self.last_resize_instant);
-            if elapsed >= std::time::Duration::from_millis(25) {
+
+            if elapsed >= std::time::Duration::from_millis(30) {
+                // Immediate leading edge
                 self.last_resize_instant = now;
-                self.pending_resize = None;
+                self.last_cols = cols;
+                self.last_rows = rows;
+                self._resize_task = None;
                 self.session.try_resize(cols, rows);
             } else {
-                self.pending_resize = Some((cols, rows));
-                let remaining = std::time::Duration::from_millis(25).saturating_sub(elapsed);
+                // Schedule trailing edge to guarantee final dimension sync
+                let remaining = std::time::Duration::from_millis(30).saturating_sub(elapsed);
                 self._resize_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
                     let cx = cx.clone();
                     async move {
@@ -411,9 +413,11 @@ impl Render for ZenviView {
                         let _ = cx.update(|cx| {
                             if let Some(entity) = this.upgrade() {
                                 entity.update(cx, |this, _cx| {
-                                    if let Some((c, r)) = this.pending_resize.take() {
+                                    if cols != this.last_cols || rows != this.last_rows {
                                         this.last_resize_instant = std::time::Instant::now();
-                                        this.session.try_resize(c, r);
+                                        this.last_cols = cols;
+                                        this.last_rows = rows;
+                                        this.session.try_resize(cols, rows);
                                     }
                                 });
                             }
