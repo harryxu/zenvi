@@ -57,6 +57,7 @@ pub struct ZenviView {
     pub last_interaction_instant: Option<std::time::Instant>,
     pub pending_mouse_drag: Option<(usize, usize, Modifiers)>,
     pub last_drag_instant: std::time::Instant,
+    pub is_drag_in_flight: bool,
     pub scrollbar_drag_col: Option<usize>,
     /// Persistent render cache for incremental grid rendering (dirty-row tracking).
     pub grid_cache: components::grid::GridRenderCache,
@@ -161,6 +162,7 @@ impl ZenviView {
             last_interaction_instant: None,
             pending_mouse_drag: None,
             last_drag_instant: std::time::Instant::now(),
+            is_drag_in_flight: false,
             scrollbar_drag_col: None,
             grid_cache: components::grid::GridRenderCache::new(),
         }
@@ -184,6 +186,7 @@ impl ZenviView {
                             if entity
                                 .update(&mut cx, |this, cx| {
                                     this.trigger_interaction();
+                                    this.release_drag_backpressure(cx);
                                     cx.notify();
                                 })
                                 .is_err()

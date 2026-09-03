@@ -65,6 +65,7 @@ impl ZenviView {
             self.is_mouse_down = true;
             self.last_mouse_pos = Some((col, row));
             self.last_drag_instant = std::time::Instant::now();
+            self.is_drag_in_flight = false;
             self.pending_mouse_drag = None;
             self._drag_task = None;
             // When clicking the right border scrollbar, lock the drag column to this position.
@@ -82,7 +83,7 @@ impl ZenviView {
     }
 
     /// Handles mouse button release events for any button.
-    /// For left button, stops drag tracking.
+    /// For left button, stops drag tracking and clears any queued in-flight drags.
     pub fn handle_mouse_up(
         &mut self,
         button: &str,
@@ -99,6 +100,7 @@ impl ZenviView {
 
         if button == "left" {
             self.is_mouse_down = false;
+            self.is_drag_in_flight = false;
             self.last_mouse_pos = None;
             self.pending_mouse_drag = None;
             self._drag_task = None;
@@ -110,8 +112,9 @@ impl ZenviView {
     }
 
     /// Handles mouse drag when left button is held down.
-    /// Uses 16ms (60 Hz) timer throttling and latest-coordinate coalescing via asynchronous Notification.
-    /// Eliminates request-response roundtrip lag while preventing Neovim input queue flooding.
+    /// Uses backpressure-driven latest-coordinate coalescing: if a drag request is still in flight
+    /// (being rendered by Neovim / GPUI), intermediate mouse events are merged in O(1) without flooding Neovim.
+    /// As soon as Neovim flushes Redraw, the latest target coordinate is immediately dispatched.
     pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if !self.is_mouse_down {
             return;
@@ -125,17 +128,41 @@ impl ZenviView {
         }
         self.last_mouse_pos = Some((effective_col, row));
 
+        if self.is_drag_in_flight {
+            // Backpressure: A drag request is still being processed by Neovim/renderer.
+            // Coalesce intermediate movement by updating the pending destination.
+            self.pending_mouse_drag = Some((effective_col, row, event.modifiers.clone()));
+            return;
+        }
+
         let now = std::time::Instant::now();
         let elapsed = now.duration_since(self.last_drag_instant);
         let throttle_interval = std::time::Duration::from_millis(16); // 60 Hz rate limit
 
         if elapsed >= throttle_interval {
             self.last_drag_instant = now;
+            self.is_drag_in_flight = true;
             self.pending_mouse_drag = None;
             self._drag_task = None;
             let mods = mods_to_nvim(&event.modifiers);
             self.session
                 .send_mouse("left", "drag", mods, 0, row, effective_col);
+
+            // Watchdog fallback: If Neovim emits no redraw within 45ms (e.g. no-op line jump),
+            // automatically release backpressure so subsequent drags never lock up.
+            self._drag_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                let cx = cx.clone();
+                async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(45)).await;
+                    let _ = cx.update(|cx| {
+                        if let Some(entity) = this.upgrade() {
+                            entity.update(cx, |this, cx| {
+                                this.release_drag_backpressure(cx);
+                            });
+                        }
+                    });
+                }
+            }));
         } else {
             self.pending_mouse_drag = Some((effective_col, row, event.modifiers.clone()));
             if self._drag_task.is_none() {
@@ -146,22 +173,59 @@ impl ZenviView {
                         tokio::time::sleep(remaining).await;
                         let _ = cx.update(|cx| {
                             if let Some(entity) = this.upgrade() {
-                                entity.update(cx, |this, _cx| {
+                                entity.update(cx, |this, cx| {
                                     this._drag_task = None;
-                                    if this.is_mouse_down {
-                                        if let Some((c, r, m)) = this.pending_mouse_drag.take() {
-                                            this.last_drag_instant = std::time::Instant::now();
-                                            let mods = mods_to_nvim(&m);
-                                            this.session
-                                                .send_mouse("left", "drag", mods, 0, r, c);
-                                        }
-                                    }
+                                    this.flush_pending_drag(cx);
                                 });
                             }
                         });
                     }
                 }));
             }
+        }
+    }
+
+    /// Releases drag backpressure upon receiving Neovim redraw or watchdog timeout,
+    /// and immediately dispatches the latest coalesced position if any.
+    pub fn release_drag_backpressure(&mut self, cx: &mut Context<Self>) {
+        if !self.is_mouse_down {
+            self.is_drag_in_flight = false;
+            self.pending_mouse_drag = None;
+            return;
+        }
+
+        self.is_drag_in_flight = false;
+        self.flush_pending_drag(cx);
+    }
+
+    /// Flushes the latest pending drag coordinate if no drag is currently in flight.
+    pub fn flush_pending_drag(&mut self, cx: &mut Context<Self>) {
+        if !self.is_mouse_down || self.is_drag_in_flight {
+            return;
+        }
+
+        if let Some((col, row, modifiers)) = self.pending_mouse_drag.take() {
+            let now = std::time::Instant::now();
+            self.last_drag_instant = now;
+            self.is_drag_in_flight = true;
+            let mods = mods_to_nvim(&modifiers);
+            self.session
+                .send_mouse("left", "drag", mods, 0, row, col);
+
+            // Arm watchdog fallback for this flushed drag
+            self._drag_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                let cx = cx.clone();
+                async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(45)).await;
+                    let _ = cx.update(|cx| {
+                        if let Some(entity) = this.upgrade() {
+                            entity.update(cx, |this, cx| {
+                                this.release_drag_backpressure(cx);
+                            });
+                        }
+                    });
+                }
+            }));
         }
     }
 
