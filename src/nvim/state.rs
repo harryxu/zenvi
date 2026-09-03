@@ -480,6 +480,9 @@ pub struct NvimState {
     pub title: String,
     pub guifont: String,
     pub linespace: i64,
+    /// Indicates whether Neovim is executing a background idle prewarm sweep.
+    /// During prewarming, visual rendering remains frozen to prevent screen flicker.
+    pub is_prewarming: bool,
 }
 
 impl NvimState {
@@ -520,6 +523,7 @@ impl Default for NvimState {
             title: "Zenvi".to_string(),
             guifont: String::new(),
             linespace: 0,
+            is_prewarming: false,
         }
     }
 }

@@ -76,6 +76,8 @@ pub struct ZenviView {
     pub last_drag_instant: std::time::Instant,
     pub is_drag_in_flight: bool,
     pub scrollbar_drag_col: Option<usize>,
+    /// Frozen snapshot of rendered rows used during background prewarming to eliminate screen flicker.
+    pub frozen_visual_rows: Option<Vec<Option<components::grid::CachedRow>>>,
     /// Persistent render cache for incremental grid rendering (dirty-row tracking).
     pub grid_cache: components::grid::GridRenderCache,
 }
@@ -181,6 +183,7 @@ impl ZenviView {
             last_drag_instant: std::time::Instant::now(),
             is_drag_in_flight: false,
             scrollbar_drag_col: None,
+            frozen_visual_rows: None,
             grid_cache: components::grid::GridRenderCache::new(),
         }
     }
@@ -420,6 +423,14 @@ impl Render for ZenviView {
             }
         }
 
+        if state.is_prewarming {
+            if self.frozen_visual_rows.is_none() {
+                self.frozen_visual_rows = Some(self.grid_cache.rows.clone());
+            }
+        } else {
+            self.frozen_visual_rows = None;
+        }
+
         let grid_element = components::grid::render_grid(
             &state,
             grid,
@@ -429,6 +440,7 @@ impl Render for ZenviView {
             self.char_width,
             &mut self.grid_cache,
             None,
+            self.frozen_visual_rows.as_deref(),
             window,
         );
 

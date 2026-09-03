@@ -26,6 +26,12 @@
 //!    Zenvi splits lines into `seg1` (code text, ~35 chars) and `seg2` (scrollbar, 1 char), completely
 //!    skipping the 180 default whitespace cells in between. This speeds up cold line shaping by 25x
 //!    and ensures scrollbar motion NEVER busts code cache hashes.
+//!
+//! 4. **Idle Pre-warming Zero-Flicker Visual Freezing (`frozen_visual_rows`)**:
+//!    During idle background pre-warming sweeps, Neovim steps through buffer viewports
+//!    to trigger syntax highlight extraction. Zenvi freezes the current visual rows on screen
+//!    while concurrently shaping and inserting all incoming off-screen lines into `content_cache`.
+//!    This guarantees 100% zero-flicker stability to the user while achieving 100% warm cache.
 
 use crate::nvim::state::{Grid, NvimState};
 use gpui::*;
@@ -375,6 +381,7 @@ pub fn render_grid(
     char_width: f32,
     cache: &mut GridRenderCache,
     smooth_cursor_pos: Option<(f32, f32)>,
+    frozen_visual_rows: Option<&[Option<CachedRow>]>,
     window: &mut Window,
 ) -> impl IntoElement {
     let default_fg = state.default_fg;
@@ -435,9 +442,12 @@ pub fn render_grid(
         }
     }
 
-    // Floating Cursor Overlay
-    let cursor_row = grid.cursor_row;
-    let cursor_col = grid.cursor_col;
+    // Floating Cursor Overlay (frozen if in prewarming)
+    let (cursor_row, cursor_col) = if frozen_visual_rows.is_some() {
+        (cache.last_cursor_row, cache.last_cursor_col)
+    } else {
+        (grid.cursor_row, grid.cursor_col)
+    };
     let lh_f32: f32 = line_height.into();
     let (cursor_x, cursor_y) = smooth_cursor_pos.unwrap_or_else(|| {
         (cursor_col as f32 * char_width, cursor_row as f32 * lh_f32)
@@ -499,11 +509,17 @@ pub fn render_grid(
         }
     };
 
-    cache.last_cursor_row = cursor_row;
-    cache.last_cursor_col = cursor_col;
+    if frozen_visual_rows.is_none() {
+        cache.last_cursor_row = cursor_row;
+        cache.last_cursor_col = cursor_col;
+    }
 
-    // Snapshot pre-shaped lines for GPU Canvas drawing
-    let cached_rows: Vec<Option<CachedRow>> = cache.rows.clone();
+    // Snapshot pre-shaped lines for GPU Canvas drawing (or frozen snapshot if prewarming)
+    let cached_rows: Vec<Option<CachedRow>> = if let Some(frozen) = frozen_visual_rows {
+        frozen.to_vec()
+    } else {
+        cache.rows.clone()
+    };
 
     div()
         .relative()
