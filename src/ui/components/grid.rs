@@ -27,11 +27,19 @@ pub struct FontVariants {
     pub bold_italic: Font,
 }
 
+/// A contiguous segment of text within a line, starting at column `col_start`.
+#[derive(Clone)]
+pub struct RowSegment {
+    pub col_start: usize,
+    pub shaped_line: ShapedLine,
+}
+
 /// Cached pre-shaped row for GPU Canvas direct rendering.
-/// Survives across frames and linegrid scrolls.
+/// Decouples code content from right-margin scrollbars/signs, skipping wide default whitespace gaps.
 #[derive(Clone)]
 pub struct CachedRow {
-    pub shaped_line: ShapedLine,
+    pub seg1: Option<RowSegment>,
+    pub seg2: Option<RowSegment>,
     pub is_empty: bool,
 }
 
@@ -131,60 +139,45 @@ impl GridRenderCache {
     }
 }
 
-/// Builds pre-shaped row data from grid cells and highlight attributes,
-/// ready for direct GPU canvas painting.
-fn build_cached_row(
-    row: &[crate::nvim::state::Cell],
+/// Checks if a cell is an unstyled, empty default space that requires no glyph shaping or custom background quad.
+#[inline]
+fn is_default_space(cell: &crate::nvim::state::Cell, state: &NvimState, default_bg: u32) -> bool {
+    let s = cell.text_str();
+    if s != " " && !s.is_empty() {
+        return false;
+    }
+    if cell.hl_id == 0 {
+        return true;
+    }
+    if let Some(attr) = state.get_highlight(cell.hl_id) {
+        let bg = attr.background.unwrap_or(default_bg);
+        if bg != default_bg || attr.reverse || attr.underline || attr.undercurl {
+            return false;
+        }
+    }
+    true
+}
+
+/// Shapes a slice of cells into a ShapedLine, using the content_cache if already seen.
+fn shape_cells(
+    cells: &[crate::nvim::state::Cell],
     state: &NvimState,
-    _default_style: &TextStyle,
     font_variants: &FontVariants,
     window: &mut Window,
     font_size: Pixels,
     content_cache: &mut HashMap<u64, ShapedLine>,
-) -> CachedRow {
-    let default_fg = state.default_fg;
-    let default_bg = state.default_bg;
-
-    // Find the rightmost cell that has content or non-default styling
-    let last_content_col = row.iter().rposition(|cell| {
-        let s = cell.text_str();
-        if s != " " && !s.is_empty() {
-            return true;
-        }
-        if cell.hl_id == 0 {
-            return false;
-        }
-        if let Some(attr) = state.get_highlight(cell.hl_id) {
-            let bg = attr.background.unwrap_or(default_bg);
-            if bg != default_bg || attr.reverse || attr.underline || attr.undercurl {
-                return true;
-            }
-        }
-        false
-    });
-
-    let Some(last_col) = last_content_col else {
-        return CachedRow {
-            shaped_line: ShapedLine::default(),
-            is_empty: true,
-        };
-    };
-
-    let visible_cells = &row[..=last_col];
-
-    // Check content-addressable line cache first
-    let line_hash = hash_cells(visible_cells);
-    if let Some(shaped) = content_cache.get(&line_hash) {
-        return CachedRow {
-            shaped_line: shaped.clone(),
-            is_empty: false,
-        };
+) -> ShapedLine {
+    let hash = hash_cells(cells);
+    if let Some(shaped) = content_cache.get(&hash) {
+        return shaped.clone();
     }
 
-    let mut line_text = String::with_capacity(visible_cells.len() * 2);
+    let default_fg = state.default_fg;
+    let default_bg = state.default_bg;
+    let mut line_text = String::with_capacity(cells.len() * 2);
     let mut runs: Vec<TextRun> = Vec::new();
 
-    for cell in visible_cells {
+    for cell in cells {
         let text = cell.text_str();
         if cell.width == 0 && text.is_empty() {
             continue;
@@ -263,11 +256,84 @@ fn build_cached_row(
     if content_cache.len() >= 4096 {
         content_cache.clear();
     }
-    content_cache.insert(line_hash, shaped_line.clone());
+    content_cache.insert(hash, shaped_line.clone());
 
-    CachedRow {
-        shaped_line,
-        is_empty: false,
+    shaped_line
+}
+
+/// Builds pre-shaped row data from grid cells and highlight attributes,
+/// skipping empty whitespace gaps between code text and right-margin scrollbars.
+fn build_cached_row(
+    row: &[crate::nvim::state::Cell],
+    state: &NvimState,
+    font_variants: &FontVariants,
+    window: &mut Window,
+    font_size: Pixels,
+    content_cache: &mut HashMap<u64, ShapedLine>,
+) -> CachedRow {
+    let default_bg = state.default_bg;
+
+    // Find the rightmost cell that has content or non-default styling
+    let last_content_col = row.iter().rposition(|c| !is_default_space(c, state, default_bg));
+
+    let Some(last_col) = last_content_col else {
+        return CachedRow {
+            seg1: None,
+            seg2: None,
+            is_empty: true,
+        };
+    };
+
+    // Detect if there is a gap of >= 4 default spaces separating code from a right-edge cluster (e.g. scrollbar)
+    let mut right_start = last_col;
+    while right_start > 0 && !is_default_space(&row[right_start - 1], state, default_bg) {
+        right_start -= 1;
+    }
+
+    let mut gap_len = 0;
+    let mut probe = right_start;
+    while probe > 0 && is_default_space(&row[probe - 1], state, default_bg) {
+        gap_len += 1;
+        probe -= 1;
+    }
+
+    if gap_len >= 4 {
+        // Multi-segment: Code in columns [0..probe], scrollbar in [right_start..=last_col]
+        let seg1 = if probe > 0 {
+            let cells = &row[..probe];
+            let shaped = shape_cells(cells, state, font_variants, window, font_size, content_cache);
+            Some(RowSegment {
+                col_start: 0,
+                shaped_line: shaped,
+            })
+        } else {
+            None
+        };
+
+        let right_cells = &row[right_start..=last_col];
+        let shaped_right = shape_cells(right_cells, state, font_variants, window, font_size, content_cache);
+        let seg2 = Some(RowSegment {
+            col_start: right_start,
+            shaped_line: shaped_right,
+        });
+
+        CachedRow {
+            seg1,
+            seg2,
+            is_empty: false,
+        }
+    } else {
+        // Single contiguous segment [0..=last_col]
+        let cells = &row[..=last_col];
+        let shaped = shape_cells(cells, state, font_variants, window, font_size, content_cache);
+        CachedRow {
+            seg1: Some(RowSegment {
+                col_start: 0,
+                shaped_line: shaped,
+            }),
+            seg2: None,
+            is_empty: false,
+        }
     }
 }
 
@@ -328,7 +394,6 @@ pub fn render_grid(
             let cached = build_cached_row(
                 row,
                 state,
-                &default_style,
                 &font_variants,
                 window,
                 font_size,
@@ -409,19 +474,7 @@ pub fn render_grid(
     cache.last_cursor_col = cursor_col;
 
     // Snapshot pre-shaped lines for GPU Canvas drawing
-    let cached_rows: Vec<Option<ShapedLine>> = cache
-        .rows
-        .iter()
-        .map(|r| {
-            r.as_ref().and_then(|c| {
-                if c.is_empty {
-                    None
-                } else {
-                    Some(c.shaped_line.clone())
-                }
-            })
-        })
-        .collect();
+    let cached_rows: Vec<Option<CachedRow>> = cache.rows.clone();
 
     div()
         .relative()
@@ -437,15 +490,29 @@ pub fn render_grid(
                     // Fill grid background
                     window.paint_quad(fill(bounds, rgb(default_bg)));
 
-                    // Direct GPU draw calls for all pre-shaped rows
-                    for (r, maybe_shaped) in cached_rows.into_iter().enumerate() {
-                        if let Some(shaped) = maybe_shaped {
-                            let origin = Point::new(
-                                bounds.left(),
-                                bounds.top() + px(r as f32 * lh_f32),
-                            );
-                            let _ = shaped.paint_background(origin, line_height, window, cx);
-                            let _ = shaped.paint(origin, line_height, window, cx);
+                    // Direct GPU draw calls for all row segments
+                    for (r, maybe_cached) in cached_rows.into_iter().enumerate() {
+                        if let Some(cached) = maybe_cached {
+                            if cached.is_empty {
+                                continue;
+                            }
+                            let y = bounds.top() + px(r as f32 * lh_f32);
+                            if let Some(ref seg) = cached.seg1 {
+                                let origin = Point::new(
+                                    bounds.left() + px(seg.col_start as f32 * char_width),
+                                    y,
+                                );
+                                let _ = seg.shaped_line.paint_background(origin, line_height, window, cx);
+                                let _ = seg.shaped_line.paint(origin, line_height, window, cx);
+                            }
+                            if let Some(ref seg) = cached.seg2 {
+                                let origin = Point::new(
+                                    bounds.left() + px(seg.col_start as f32 * char_width),
+                                    y,
+                                );
+                                let _ = seg.shaped_line.paint_background(origin, line_height, window, cx);
+                                let _ = seg.shaped_line.paint(origin, line_height, window, cx);
+                            }
                         }
                     }
                 },
