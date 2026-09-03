@@ -237,6 +237,7 @@ pub fn render_grid(
     line_height: Pixels,
     char_width: f32,
     cache: &mut GridRenderCache,
+    smooth_cursor_pos: Option<(f32, f32)>,
 ) -> impl IntoElement {
     let default_fg = state.default_fg;
     let default_bg = state.default_bg;
@@ -309,8 +310,9 @@ pub fn render_grid(
     let cursor_row = grid.cursor_row;
     let cursor_col = grid.cursor_col;
     let lh_f32: f32 = line_height.into();
-    let cursor_x = cursor_col as f32 * char_width;
-    let cursor_y = cursor_row as f32 * lh_f32;
+    let (cursor_x, cursor_y) = smooth_cursor_pos.unwrap_or_else(|| {
+        (cursor_col as f32 * char_width, cursor_row as f32 * lh_f32)
+    });
 
     let cell_under_cursor = grid.get_cell(cursor_row, cursor_col);
 

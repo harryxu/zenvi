@@ -54,10 +54,9 @@ pub struct ZenviView {
     pub(crate) _resize_task: Option<Task<()>>,
     pub(crate) _drag_task: Option<Task<()>>,
     pub(crate) _event_task: Option<Task<()>>,
-    pub(crate) _render_pump_task: Option<Task<()>>,
     pub last_interaction_instant: Option<std::time::Instant>,
-    pub last_drag_instant: std::time::Instant,
     pub pending_mouse_drag: Option<(usize, usize, Modifiers)>,
+    pub is_drag_in_flight: bool,
     pub scrollbar_drag_col: Option<usize>,
     /// Persistent render cache for incremental grid rendering (dirty-row tracking).
     pub grid_cache: components::grid::GridRenderCache,
@@ -159,10 +158,9 @@ impl ZenviView {
             _resize_task: None,
             _drag_task: None,
             _event_task: Some(event_task),
-            _render_pump_task: None,
             last_interaction_instant: None,
-            last_drag_instant: std::time::Instant::now(),
             pending_mouse_drag: None,
+            is_drag_in_flight: false,
             scrollbar_drag_col: None,
             grid_cache: components::grid::GridRenderCache::new(),
         }
@@ -185,7 +183,7 @@ impl ZenviView {
                             };
                             if entity
                                 .update(&mut cx, |this, cx| {
-                                    this.trigger_interaction(cx);
+                                    this.trigger_interaction();
                                     cx.notify();
                                 })
                                 .is_err()
@@ -215,46 +213,11 @@ impl ZenviView {
         })
     }
 
-    /// Triggers the active 60 FPS swapchain presentation loop during user interaction
-    /// (aligning with Neovide's active presentation model).
-    /// Keeps pumping 60 FPS frames while user interaction or Neovim redraws occur,
-    /// then silently stops after 300ms of inactivity to guarantee 0 FPS idle.
-    pub(crate) fn trigger_interaction(&mut self, cx: &mut Context<Self>) {
+    /// Marks the current instant as an active interaction point.
+    /// Used by Render::render to keep the native VSync frame pump active (via request_animation_frame)
+    /// during key repeat, mouse drags, and smooth animations, then fade out to 0 FPS idle after 250ms.
+    pub(crate) fn trigger_interaction(&mut self) {
         self.last_interaction_instant = Some(std::time::Instant::now());
-        if self._render_pump_task.is_none() {
-            self._render_pump_task = Some(cx.spawn(|this: WeakEntity<Self>, cx: &mut AsyncApp| {
-                let cx = cx.clone();
-                async move {
-                    let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
-                    interval.tick().await; // Skip initial tick
-                    loop {
-                        interval.tick().await;
-                        let active = cx
-                            .update(|cx| {
-                                let Some(entity) = this.upgrade() else {
-                                    return false;
-                                };
-                                entity.update(cx, |this, cx| {
-                                    if let Some(t) = this.last_interaction_instant {
-                                        if t.elapsed() < std::time::Duration::from_millis(300) {
-                                            cx.notify();
-                                            return true;
-                                        }
-                                    }
-                                    this.last_interaction_instant = None;
-                                    this._render_pump_task = None;
-                                    false
-                                })
-                            })
-                            .unwrap_or(false);
-
-                        if !active {
-                            break;
-                        }
-                    }
-                }
-            }));
-        }
     }
 
     /// Binds all GPUI action handlers to the root element.
@@ -437,6 +400,23 @@ impl Render for ZenviView {
             }
         }
 
+        // Keep active 60 FPS presentation loop while mouse is dragging or during user interaction
+        let is_animating = self.is_mouse_down
+            || self.last_interaction_instant.map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
+
+        if is_animating {
+            let entity = cx.entity().downgrade();
+            window.on_next_frame(move |_, cx| {
+                if let Some(entity) = entity.upgrade() {
+                    entity.update(cx, |_, cx| {
+                        cx.notify();
+                    });
+                }
+            });
+        } else {
+            self.last_interaction_instant = None;
+        }
+
         let grid_element = components::grid::render_grid(
             &state,
             grid,
@@ -445,6 +425,7 @@ impl Render for ZenviView {
             self.line_height,
             self.char_width,
             &mut self.grid_cache,
+            None,
         );
 
         let focus_handle = self.focus_handle.clone();
@@ -490,7 +471,7 @@ impl Render for ZenviView {
             )
             // Keyboard input
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
-                this.trigger_interaction(cx);
+                this.trigger_interaction();
                 #[cfg(not(target_os = "macos"))]
                 if this.is_menu_open {
                     let is_esc = event.keystroke.key == "escape" || event.keystroke.key == "Esc" || event.keystroke.key == "\u{1b}";

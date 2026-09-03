@@ -1,5 +1,6 @@
 use super::{ZenviView, GRID_PADDING_LEFT, TOP_OFFSET};
 use gpui::*;
+use std::sync::Arc;
 
 /// Converts GPUI modifier flags to Neovim modifier string (e.g. "CS" for Ctrl+Shift)
 /// without any heap allocations.
@@ -59,11 +60,14 @@ impl ZenviView {
             self.active_submenu = None;
         }
         window.focus(&self.focus_handle);
-        self.trigger_interaction(cx);
+        self.trigger_interaction();
         let (col, row) = self.pos_to_grid(position);
         if button == "left" {
             self.is_mouse_down = true;
             self.last_mouse_pos = Some((col, row));
+            self.is_drag_in_flight = false;
+            self.pending_mouse_drag = None;
+            self._drag_task = None;
             // When clicking the right border scrollbar, lock the drag column to this position.
             // This grants mouse capture so moving horizontally into the editor buffer won't abort the scrollbar drag.
             if col >= self.last_cols.saturating_sub(3) {
@@ -98,6 +102,7 @@ impl ZenviView {
             self.is_mouse_down = false;
             self.last_mouse_pos = None;
             self.pending_mouse_drag = None;
+            self.is_drag_in_flight = false;
             self._drag_task = None;
             cx.notify(); // Re-render to detach on_mouse_move listener
         }
@@ -107,11 +112,14 @@ impl ZenviView {
     }
 
     /// Handles mouse drag when left button is held down.
+    /// Implements closed-loop in-flight backpressure and latest-coordinate coalescing:
+    /// Never floods Neovim with more than 1 pending drag request at a time.
     pub fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if !self.is_mouse_down {
             return;
         }
-        self.trigger_interaction(cx);
+        self.trigger_interaction();
+        cx.notify();
         let (col, row) = self.pos_to_grid(event.position);
         let effective_col = self.scrollbar_drag_col.unwrap_or(col);
 
@@ -120,54 +128,61 @@ impl ZenviView {
         }
         self.last_mouse_pos = Some((effective_col, row));
 
-        let now = std::time::Instant::now();
-        let elapsed = now.duration_since(self.last_drag_instant);
-        let interval = std::time::Duration::from_millis(16);
-
-        if elapsed >= interval {
-            self.last_drag_instant = now;
-            self.pending_mouse_drag = None;
-            self._drag_task = None;
-            let mods = mods_to_nvim(&event.modifiers);
-            self.session
-                .send_mouse("left", "drag", mods, 0, row, effective_col);
-        } else {
+        if self.is_drag_in_flight {
+            // Neovim is still processing previous drag: buffer the freshest coordinate
             self.pending_mouse_drag = Some((effective_col, row, event.modifiers.clone()));
-            if self._drag_task.is_none() {
-                let remaining = interval.saturating_sub(elapsed);
-                self._drag_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-                    let cx = cx.clone();
-                    async move {
-                        tokio::time::sleep(remaining).await;
-                        let _ = cx.update(|cx| {
-                            if let Some(entity) = this.upgrade() {
-                                entity.update(cx, |this, cx| {
-                                    this._drag_task = None;
-                                    if let Some((c, r, mods)) = this.pending_mouse_drag.take() {
-                                        this.last_drag_instant = std::time::Instant::now();
-                                        this.trigger_interaction(cx);
-                                        let mods_str = mods_to_nvim(&mods);
-                                        this.session.send_mouse("left", "drag", mods_str, 0, r, c);
-                                    }
-                                });
+        } else {
+            // Dispatch immediately with backpressure tracking
+            self.dispatch_mouse_drag(effective_col, row, &event.modifiers, cx);
+        }
+    }
+
+    /// Dispatches a mouse drag request to Neovim and awaits its response before sending the next buffered drag.
+    pub fn dispatch_mouse_drag(
+        &mut self,
+        col: usize,
+        row: usize,
+        modifiers: &Modifiers,
+        cx: &mut Context<Self>,
+    ) {
+        self.is_drag_in_flight = true;
+        self.pending_mouse_drag = None;
+        let mods = mods_to_nvim(modifiers);
+        let session = Arc::clone(&self.session);
+
+        self._drag_task = Some(cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let cx = cx.clone();
+            async move {
+                let _ = session
+                    .request_mouse("left", "drag", mods, 0, row, col)
+                    .await;
+
+                let _ = cx.update(|cx| {
+                    if let Some(entity) = this.upgrade() {
+                        entity.update(cx, |this, cx| {
+                            this.is_drag_in_flight = false;
+                            this._drag_task = None;
+                            if this.is_mouse_down {
+                                if let Some((c, r, m)) = this.pending_mouse_drag.take() {
+                                    this.dispatch_mouse_drag(c, r, &m, cx);
+                                }
                             }
                         });
                     }
-                }));
+                });
             }
-        }
+        }));
     }
 
     /// Handles scroll wheel events, converting pixel or line deltas
     /// into discrete Neovim scroll commands with calibrated distance.
-    pub fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
-        self.trigger_interaction(cx);
+    pub fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent, _cx: &mut Context<Self>) {
+        self.trigger_interaction();
         let (col, row) = self.pos_to_grid(event.position);
         let mods = mods_to_nvim(&event.modifiers);
 
         let lh_f32: f32 = self.line_height.into();
         // Calibrated step: 1 wheel notch (~100-120px) or swipe produces 1-2 ticks (~3-6 lines in Neovim),
-        // matching Neovide's exact scroll distance (~30 lines per flick instead of 90 lines).
         let step = (lh_f32 * 2.4).max(45.0);
 
         let mut ticks = 0i32;

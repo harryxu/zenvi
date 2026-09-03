@@ -429,6 +429,29 @@ impl NvimSession {
         let _ = self.tx.send(msg.into_value());
     }
 
+    pub async fn request_mouse(
+        &self,
+        button: &str,
+        action: &str,
+        modifier: &str,
+        grid: u64,
+        row: usize,
+        col: usize,
+    ) -> Result<Value> {
+        self.request(
+            "nvim_input_mouse",
+            vec![
+                Value::from(button),
+                Value::from(action),
+                Value::from(modifier),
+                Value::from(grid),
+                Value::from(row as u64),
+                Value::from(col as u64),
+            ],
+        )
+        .await
+    }
+
     pub fn try_resize(&self, width: usize, height: usize) {
         let msg = RpcMessage::Notification {
             method: "nvim_ui_try_resize".to_string(),
