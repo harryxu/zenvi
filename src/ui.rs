@@ -1,3 +1,20 @@
+//! # Zenvi Root View & Rendering Lifecycle
+//!
+//! ## Architectural Overview & Optimization Principles
+//!
+//! 1. **High-Performance Direct GPU Render Cycle**:
+//!    Zenvi replaces traditional DOM trees with a single GPU `canvas()` element.
+//!    Pre-shaped row segments are submitted directly to the GPU scene graph in <0.5ms per frame,
+//!    ensuring instant, zero-latency physical visual response without artificial animation delay.
+//!
+//! 2. **Input Backpressure & Coalescing Pipeline**:
+//!    Mouse and keyboard events route to Neovim without blocking the UI thread. Drag operations
+//!    use backpressure gating (`is_drag_in_flight`) to drop intermediate stale jumps and eliminate
+//!    Neovim queue backlog during rapid scrollbar dragging.
+//!
+//! 3. **Window Lifecycle & Client-Side Decorations**:
+//!    Provides native window frame management, titlebar controls, and cascade window positioning.
+
 pub mod commands;
 pub mod components;
 pub mod font;

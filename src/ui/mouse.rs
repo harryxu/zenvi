@@ -1,3 +1,27 @@
+//! # Mouse Interaction & Drag Backpressure Subsystem
+//!
+//! ## Architectural Overview & Optimization Principles
+//!
+//! 1. **Backpressure-Driven Drag Coalescing (`is_drag_in_flight`)**:
+//!    When a user drags the right-edge scrollbar rapidly, the mouse generates dozens of movement events
+//!    in under 300ms. If every intermediate drag coordinate were dispatched to Neovim as an RPC call,
+//!    Neovim's input queue would become congested with obsolete intermediate buffer jumps, causing
+//!    visual lag where the display struggles to "catch up" with the cursor long after the drag stopped.
+//!    Zenvi solves this with an in-flight backpressure gate:
+//!    - When a drag message is in-flight to Neovim, incoming mouse move events update `pending_mouse_drag`
+//!      in $O(1)$ memory without sending intermediate RPC packets.
+//!    - When Neovim emits `NvimEvent::Redraw`, backpressure is unlocked and the latest target position
+//!      is dispatched immediately. Intermediate stale jumps are dropped completely.
+//!
+//! 2. **Scrollbar Column Lock & Mouse Capture**:
+//!    When clicking within the rightmost columns (`col >= last_cols - 3`), Zenvi locks `scrollbar_drag_col`.
+//!    This prevents mouse drift towards the center of the buffer from accidentally aborting the scrollbar drag.
+//!
+//! 3. **Watchdog Self-Healing (45ms Timeout)**:
+//!    If Neovim skips redrawing for a no-op movement (e.g. dragging within the exact same buffer line),
+//!    a background 45ms watchdog timer automatically clears `is_drag_in_flight` to ensure drag responsiveness
+//!    never deadlocks.
+
 use super::{ZenviView, GRID_PADDING_LEFT, TOP_OFFSET};
 use gpui::*;
 
