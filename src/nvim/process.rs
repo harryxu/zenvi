@@ -108,39 +108,9 @@ impl NvimSession {
         // when a session is restored (via auto-session, persistence.nvim, or native :source Session.vim).
         // Neovim suppresses standard FileType autocommands while SessionLoad=1 during session sourcing,
         // leaving restored buffers with an empty filetype ("") and without syntax highlighting.
-        cmd.arg("--cmd").arg(
-            r#"lua (function()
-                local function restore_buffer_filetypes()
-                    local function detect()
-                        for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-                            if vim.api.nvim_buf_is_loaded(buf) and vim.api.nvim_buf_get_name(buf) ~= "" then
-                                if vim.bo[buf].filetype == "" then
-                                    vim.api.nvim_buf_call(buf, function()
-                                        vim.cmd("filetype detect")
-                                        pcall(vim.treesitter.start, buf)
-                                    end)
-                                end
-                            end
-                        end
-                    end
-                    detect()
-                    vim.schedule(detect)
-                end
-
-                local group = vim.api.nvim_create_augroup("ZenviSessionAutoRestore", { clear = true })
-                vim.api.nvim_create_autocmd("SessionLoadPost", {
-                    group = group,
-                    desc = "Restore filetype and syntax highlighting on session load",
-                    callback = restore_buffer_filetypes,
-                })
-                vim.api.nvim_create_autocmd("User", {
-                    group = group,
-                    pattern = { "PersistenceLoadPost", "AutoSessionRestorePost", "PossessionPostLoad", "ResessionLoadPost" },
-                    desc = "Restore filetype and syntax highlighting on plugin session load",
-                    callback = restore_buffer_filetypes,
-                })
-            end)()"#,
-        );
+        // Also sets up idle pre-warming mechanism.
+        const INIT_LUA: &str = concat!("lua ", include_str!("../../lua/init.lua"));
+        cmd.arg("--cmd").arg(INIT_LUA);
 
         for target in &targets {
             cmd.arg(target);
@@ -198,8 +168,9 @@ impl NvimSession {
 
         // Background task to write to stdin
         let write_task = tokio::spawn(async move {
+            let mut buf = Vec::with_capacity(1024);
             while let Some(val) = rx.recv().await {
-                let mut buf = Vec::new();
+                buf.clear();
                 let _ = rmpv::encode::write_value(&mut buf, &val);
 
                 // Drain any additional pending values to batch multiple IPC messages in one write
@@ -220,9 +191,9 @@ impl NvimSession {
 
         // Background task to read from stdout
         let read_task = tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(stdout);
-            let mut buffer = Vec::new();
-            let mut temp_buf = [0u8; 8192];
+            let mut reader = stdout;
+            let mut buffer = Vec::with_capacity(65536);
+            let mut temp_buf = [0u8; 65536];
 
             loop {
                 match reader.read(&mut temp_buf).await {
@@ -238,23 +209,31 @@ impl NvimSession {
 
                         let mut cursor = std::io::Cursor::new(&buffer);
                         let mut last_pos = 0;
-                        let mut has_redraw = false;
 
                         while let Ok(val) = rmpv::decode::read_value(&mut cursor) {
                             last_pos = cursor.position() as usize;
                             if let Some(msg) = RpcMessage::parse(val) {
                                 match msg {
                                     RpcMessage::Notification { method, params } => {
-                                        if method == "redraw" {
-                                            {
+                                        match method.as_str() {
+                                            "redraw" => {
                                                 let mut s = state_clone.write();
                                                 for event in params {
                                                     if let Some(event_arr) = event.as_array() {
-                                                        handle_redraw_event(&mut s, event_arr);
+                                                        if handle_redraw_event(&mut s, event_arr) {
+                                                            let _ = event_tx_clone.send(NvimEvent::Redraw);
+                                                        }
                                                     }
                                                 }
                                             }
-                                            has_redraw = true;
+                                            "zenvi_prewarm_start" => {
+                                                state_clone.write().is_prewarming = true;
+                                            }
+                                            "zenvi_prewarm_end" => {
+                                                state_clone.write().is_prewarming = false;
+                                                let _ = event_tx_clone.send(NvimEvent::Redraw);
+                                            }
+                                            _ => {}
                                         }
                                     }
                                     RpcMessage::Response {
@@ -276,12 +255,12 @@ impl NvimSession {
                             }
                         }
 
-                        if has_redraw {
-                            let _ = event_tx_clone.send(NvimEvent::Redraw);
-                        }
-
                         if last_pos > 0 {
-                            buffer.drain(..last_pos);
+                            if last_pos >= buffer.len() {
+                                buffer.clear();
+                            } else {
+                                buffer.drain(..last_pos);
+                            }
                         }
                     }
                     Err(_) => {
@@ -337,7 +316,7 @@ impl NvimSession {
             params,
         };
         self.tx
-            .send(msg.to_value())
+            .send(msg.into_value())
             .map_err(|_| anyhow!("Failed to send RPC request"))?;
 
         match tokio::time::timeout(std::time::Duration::from_millis(600), rx).await {
@@ -374,33 +353,27 @@ impl NvimSession {
                 Value::Map(opts),
             ],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 
     pub fn send_input(&self, input: &str) {
-        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
-        let msg = RpcMessage::Request {
-            msgid: id,
+        let msg = RpcMessage::Notification {
             method: "nvim_input".to_string(),
             params: vec![Value::from(input)],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 
     pub fn send_command(&self, cmd: &str) {
-        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
-        let msg = RpcMessage::Request {
-            msgid: id,
+        let msg = RpcMessage::Notification {
             method: "nvim_command".to_string(),
             params: vec![Value::from(cmd)],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 
     pub fn paste(&self, data: &str) {
-        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
-        let msg = RpcMessage::Request {
-            msgid: id,
+        let msg = RpcMessage::Notification {
             method: "nvim_paste".to_string(),
             params: vec![
                 Value::from(data),
@@ -408,7 +381,7 @@ impl NvimSession {
                 Value::from(-1i64),
             ],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 
     pub fn send_mouse(
@@ -420,9 +393,7 @@ impl NvimSession {
         row: usize,
         col: usize,
     ) {
-        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
-        let msg = RpcMessage::Request {
-            msgid: id,
+        let msg = RpcMessage::Notification {
             method: "nvim_input_mouse".to_string(),
             params: vec![
                 Value::from(button),
@@ -433,17 +404,39 @@ impl NvimSession {
                 Value::from(col as u64),
             ],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
+    }
+
+    #[allow(dead_code)]
+    pub async fn request_mouse(
+        &self,
+        button: &str,
+        action: &str,
+        modifier: &str,
+        grid: u64,
+        row: usize,
+        col: usize,
+    ) -> Result<Value> {
+        self.request(
+            "nvim_input_mouse",
+            vec![
+                Value::from(button),
+                Value::from(action),
+                Value::from(modifier),
+                Value::from(grid),
+                Value::from(row as u64),
+                Value::from(col as u64),
+            ],
+        )
+        .await
     }
 
     pub fn try_resize(&self, width: usize, height: usize) {
-        let id = self.msg_id.fetch_add(1, Ordering::SeqCst);
-        let msg = RpcMessage::Request {
-            msgid: id,
+        let msg = RpcMessage::Notification {
             method: "nvim_ui_try_resize".to_string(),
             params: vec![Value::from(width as u64), Value::from(height as u64)],
         };
-        let _ = self.tx.send(msg.to_value());
+        let _ = self.tx.send(msg.into_value());
     }
 }
 
@@ -600,47 +593,7 @@ mod tests {
             let session = spawn_test_session(tx).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
-            let check_lua = r#"
-                local ok, auto_session = pcall(require, "auto-session")
-                if not ok or not auto_session then
-                    return { has_auto_session = false, should_restore = false, cwd = vim.fn.getcwd() }
-                end
-
-                local is_session_active = false
-                local this_session = vim.v.this_session
-                if this_session and this_session ~= "" then
-                    is_session_active = true
-                else
-                    local lib_ok, lib = pcall(require, "auto-session.lib")
-                    if lib_ok and lib and lib.get_session_file_name then
-                        local sfile = lib.get_session_file_name()
-                        if sfile and vim.fn.filereadable(sfile) == 1 then
-                            is_session_active = true
-                        end
-                    end
-                end
-
-                local bufs = vim.fn.getbufinfo({ buflisted = 1 })
-                local has_valid_buffers = false
-                for _, b in ipairs(bufs) do
-                    if b.name and b.name ~= "" then
-                        has_valid_buffers = true
-                        break
-                    end
-                end
-
-                local should_restore = false
-                if is_session_active or has_valid_buffers then
-                    pcall(auto_session.save_session)
-                    should_restore = true
-                end
-
-                return {
-                    has_auto_session = true,
-                    should_restore = should_restore,
-                    cwd = vim.fn.getcwd(),
-                }
-            "#;
+            let check_lua = include_str!("../../lua/commands/check_session.lua");
 
             let res = session
                 .exec_lua(check_lua, vec![])
@@ -734,16 +687,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
             let res = session
-                .exec_lua(
-                    r#"
-                return {
-                    buf = vim.api.nvim_get_current_buf(),
-                    name = vim.api.nvim_buf_get_name(0),
-                    ft = vim.bo.filetype,
-                }
-            "#,
-                    vec![],
-                )
+                .exec_lua(include_str!("../../lua/test/check_buffer_ft.lua"), vec![])
                 .await
                 .expect("Failed to query buffer info");
 
@@ -803,20 +747,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(300)).await;
 
             let res = session
-                .exec_lua(
-                    r#"
-                    local current_buf = vim.api.nvim_get_current_buf()
-                    local ft = vim.bo[current_buf].filetype
-                    local syn = vim.bo[current_buf].syntax
-                    return {
-                        buf = current_buf,
-                        name = vim.api.nvim_buf_get_name(current_buf),
-                        ft = ft,
-                        syn = syn,
-                    }
-                "#,
-                    vec![],
-                )
+                .exec_lua(include_str!("../../lua/test/check_session_restore.lua"), vec![])
                 .await
                 .expect("Failed to run exec_lua");
             println!("BUFFER INFO: {:?}", res);
@@ -836,6 +767,57 @@ mod tests {
             let _ = std::fs::remove_file(&test_rs);
             let _ = std::fs::remove_file(&session_file);
             let _ = std::fs::remove_dir(&test_dir);
+        });
+    }
+
+    #[test]
+    fn test_prewarm_lua_execution() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+            let session = NvimSession::spawn(event_tx, None, vec![std::path::PathBuf::from("Cargo.toml")]).unwrap();
+
+            // Wait briefly for nvim initialization
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            let chans = session.exec_lua("return vim.api.nvim_list_chans()", vec![]).await.unwrap();
+            println!("CHANS IN EMBEDDED NVIM: {:?}", chans);
+
+            let res = session
+                .exec_lua(include_str!("../../lua/test/test_prewarm.lua"), vec![])
+                .await
+                .expect("Failed to execute prewarm lua");
+
+            let map = res.as_map().expect("Result must be a map");
+            let mut ok = false;
+            for (k, v) in map {
+                if k.as_str() == Some("ok") {
+                    ok = v.as_bool().unwrap_or(false);
+                }
+            }
+            assert!(ok, "Prewarm should succeed for Cargo.toml");
+
+            // Test that setting vim.g.zenvi_prewarm_max_lines = 0 disables prewarm
+            session
+                .exec_lua("vim.g.zenvi_prewarm_max_lines = 0", vec![])
+                .await
+                .unwrap();
+
+            let res2 = session
+                .exec_lua(include_str!("../../lua/test/test_prewarm_disabled.lua"), vec![])
+                .await
+                .unwrap();
+
+            let map2 = res2.as_map().unwrap();
+            let mut reason = "";
+            for (k, v) in map2 {
+                if k.as_str() == Some("reason") {
+                    reason = v.as_str().unwrap_or("");
+                }
+            }
+            assert_eq!(reason, "disabled", "Setting max_lines to 0 must disable prewarming");
+
+            session.kill();
         });
     }
 }
