@@ -4,7 +4,7 @@
 
   <img src="assets/zenvi-icon.svg" width="96" alt="Zenvi icon" />
 
-  **A standalone, GPU-accelerated Neovim GUI frontend built with [GPUI](https://gpui.rs/).**
+  **A Neovim GUI frontend built with [GPUI](https://gpui.rs/).**
 
 </div>
 

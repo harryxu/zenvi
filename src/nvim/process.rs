@@ -108,143 +108,9 @@ impl NvimSession {
         // when a session is restored (via auto-session, persistence.nvim, or native :source Session.vim).
         // Neovim suppresses standard FileType autocommands while SessionLoad=1 during session sourcing,
         // leaving restored buffers with an empty filetype ("") and without syntax highlighting.
-        cmd.arg("--cmd").arg(
-            r#"lua (function()
-                local function restore_buffer_filetypes()
-                    local function detect()
-                        for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-                            if vim.api.nvim_buf_is_loaded(buf) and vim.api.nvim_buf_get_name(buf) ~= "" then
-                                if vim.bo[buf].filetype == "" then
-                                    vim.api.nvim_buf_call(buf, function()
-                                        vim.cmd("filetype detect")
-                                        pcall(vim.treesitter.start, buf)
-                                    end)
-                                end
-                            end
-                        end
-                    end
-                    detect()
-                    vim.schedule(detect)
-                end
-
-                local group = vim.api.nvim_create_augroup("ZenviSessionAutoRestore", { clear = true })
-                vim.api.nvim_create_autocmd("SessionLoadPost", {
-                    group = group,
-                    desc = "Restore filetype and syntax highlighting on session load",
-                    callback = restore_buffer_filetypes,
-                })
-                vim.api.nvim_create_autocmd("User", {
-                    group = group,
-                    pattern = { "PersistenceLoadPost", "AutoSessionRestorePost", "PossessionPostLoad", "ResessionLoadPost" },
-                    desc = "Restore filetype and syntax highlighting on plugin session load",
-                    callback = restore_buffer_filetypes,
-                })
-
-                -- ==============================================================================
-                -- Idle Pre-warming Mechanism & Future Re-Prewarming Design Plan
-                -- ==============================================================================
-                --
-                -- 1. CURRENT BEHAVIOR (BufEnter / BufReadPost):
-                --    Pre-warms all off-screen lines into Zenvi's 64-bit FNV-1a content_cache
-                --    once per buffer when opening files <= zenvi_prewarm_max_lines (default 1000).
-                --    Operates silently after an idle pause (default 600ms) with zero screen flicker.
-                --
-                -- 2. FUTURE IMPLEMENTATION BLUEPRINT (Re-Prewarming on Paste / Batch Edits):
-                --    When a user pastes or modifies large blocks of code, newly inserted lines
-                --    beyond the viewport start as cold lines. While cold shaping is already very
-                --    fast (0.08ms per line with RowSegment whitespace skipping), full prewarming
-                --    can be re-triggered using the following architecture:
-                --
-                --    a) Long Inactivity Cooldown (Debounce):
-                --       Never re-prewarm during active editing. Instead, set a 2.5s - 3.0s idle
-                --       cooldown timer after TextChanged (`vim.g.zenvi_reprewarm_idle_delay_ms`).
-                --    b) Mutation Threshold Gating:
-                --       Track `vim.b[buf].zenvi_last_line_count`. Only schedule re-prewarm if:
-                --       `math.abs(new_line_count - last_line_count) >= 10` (or after paste/undo),
-                --       completely ignoring single-keystroke edits.
-                --    c) Re-Arming:
-                --       When the 2.5s timer expires without subsequent input, clear
-                --       `vim.b[buf].zenvi_prewarmed = nil` and invoke `run_idle_prewarm()`.
-                -- ==============================================================================
-                local prewarm_group = vim.api.nvim_create_augroup("ZenviPrewarmGroup", { clear = true })
-                local prewarm_timer = nil
-
-                local function cancel_prewarm_timer()
-                    if prewarm_timer then
-                        pcall(function()
-                            prewarm_timer:stop()
-                            prewarm_timer:close()
-                        end)
-                        prewarm_timer = nil
-                    end
-                end
-
-                local function run_idle_prewarm()
-                    prewarm_timer = nil
-                    local max_lines = vim.g.zenvi_prewarm_max_lines
-                    if max_lines == nil then max_lines = 1000 end
-                    if max_lines <= 0 then return end
-
-                    local buf = vim.api.nvim_get_current_buf()
-                    if not vim.api.nvim_buf_is_valid(buf) then return end
-                    if vim.bo[buf].buftype ~= "" then return end
-                    if vim.b[buf].zenvi_prewarmed then return end
-
-                    local total = vim.api.nvim_buf_line_count(buf)
-                    if total <= 0 or total > max_lines then return end
-
-                    vim.b[buf].zenvi_prewarmed = true
-
-                    -- Notify Zenvi UI to freeze visual painting
-                    pcall(vim.rpcnotify, 1, "zenvi_prewarm_start")
-
-                    local save_view = vim.fn.winsaveview()
-                    local height = vim.api.nvim_win_get_height(0)
-                    if height <= 0 then height = 30 end
-
-                    -- Sweep through the buffer in viewport chunks to trigger linegrid redraw
-                    for l = 1, total, height do
-                        vim.api.nvim_win_set_cursor(0, { l, 0 })
-                        vim.cmd("redraw")
-                    end
-
-                    -- Restore original view seamlessly
-                    vim.fn.winrestview(save_view)
-                    vim.cmd("redraw")
-
-                    -- Notify Zenvi UI to unfreeze visual painting
-                    pcall(vim.rpcnotify, 1, "zenvi_prewarm_end")
-                end
-
-                local function schedule_idle_prewarm()
-                    cancel_prewarm_timer()
-                    local max_lines = vim.g.zenvi_prewarm_max_lines
-                    if max_lines == nil then max_lines = 1000 end
-                    if max_lines <= 0 then return end
-
-                    local buf = vim.api.nvim_get_current_buf()
-                    if not vim.api.nvim_buf_is_valid(buf) then return end
-                    if vim.bo[buf].buftype ~= "" then return end
-                    if vim.b[buf].zenvi_prewarmed then return end
-
-                    local total = vim.api.nvim_buf_line_count(buf)
-                    if total <= 0 or total > max_lines then return end
-
-                    local delay = vim.g.zenvi_prewarm_idle_delay_ms or 600
-                    prewarm_timer = vim.defer_fn(run_idle_prewarm, delay)
-                end
-
-                vim.api.nvim_create_autocmd({ "BufEnter", "BufReadPost" }, {
-                    group = prewarm_group,
-                    callback = schedule_idle_prewarm,
-                })
-
-                vim.api.nvim_create_autocmd({ "CursorMoved", "InsertEnter", "TextChanged" }, {
-                    group = prewarm_group,
-                    callback = cancel_prewarm_timer,
-                })
-            end)()"#,
-        );
+        // Also sets up idle pre-warming mechanism.
+        const INIT_LUA: &str = concat!("lua ", include_str!("../../lua/init.lua"));
+        cmd.arg("--cmd").arg(INIT_LUA);
 
         for target in &targets {
             cmd.arg(target);
@@ -727,47 +593,7 @@ mod tests {
             let session = spawn_test_session(tx).expect("Failed to spawn nvim");
             session.attach_ui(80, 24);
 
-            let check_lua = r#"
-                local ok, auto_session = pcall(require, "auto-session")
-                if not ok or not auto_session then
-                    return { has_auto_session = false, should_restore = false, cwd = vim.fn.getcwd() }
-                end
-
-                local is_session_active = false
-                local this_session = vim.v.this_session
-                if this_session and this_session ~= "" then
-                    is_session_active = true
-                else
-                    local lib_ok, lib = pcall(require, "auto-session.lib")
-                    if lib_ok and lib and lib.get_session_file_name then
-                        local sfile = lib.get_session_file_name()
-                        if sfile and vim.fn.filereadable(sfile) == 1 then
-                            is_session_active = true
-                        end
-                    end
-                end
-
-                local bufs = vim.fn.getbufinfo({ buflisted = 1 })
-                local has_valid_buffers = false
-                for _, b in ipairs(bufs) do
-                    if b.name and b.name ~= "" then
-                        has_valid_buffers = true
-                        break
-                    end
-                end
-
-                local should_restore = false
-                if is_session_active or has_valid_buffers then
-                    pcall(auto_session.save_session)
-                    should_restore = true
-                end
-
-                return {
-                    has_auto_session = true,
-                    should_restore = should_restore,
-                    cwd = vim.fn.getcwd(),
-                }
-            "#;
+            let check_lua = include_str!("../../lua/commands/check_session.lua");
 
             let res = session
                 .exec_lua(check_lua, vec![])
@@ -861,16 +687,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
             let res = session
-                .exec_lua(
-                    r#"
-                return {
-                    buf = vim.api.nvim_get_current_buf(),
-                    name = vim.api.nvim_buf_get_name(0),
-                    ft = vim.bo.filetype,
-                }
-            "#,
-                    vec![],
-                )
+                .exec_lua(include_str!("../../lua/test/check_buffer_ft.lua"), vec![])
                 .await
                 .expect("Failed to query buffer info");
 
@@ -930,20 +747,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(300)).await;
 
             let res = session
-                .exec_lua(
-                    r#"
-                    local current_buf = vim.api.nvim_get_current_buf()
-                    local ft = vim.bo[current_buf].filetype
-                    local syn = vim.bo[current_buf].syntax
-                    return {
-                        buf = current_buf,
-                        name = vim.api.nvim_buf_get_name(current_buf),
-                        ft = ft,
-                        syn = syn,
-                    }
-                "#,
-                    vec![],
-                )
+                .exec_lua(include_str!("../../lua/test/check_session_restore.lua"), vec![])
                 .await
                 .expect("Failed to run exec_lua");
             println!("BUFFER INFO: {:?}", res);
@@ -980,29 +784,7 @@ mod tests {
             println!("CHANS IN EMBEDDED NVIM: {:?}", chans);
 
             let res = session
-                .exec_lua(
-                    r#"
-                    local max_lines = vim.g.zenvi_prewarm_max_lines
-                    if max_lines == nil then max_lines = 1000 end
-                    if max_lines <= 0 then return { ok = false, reason = "disabled" } end
-
-                    local count = vim.fn.line("$")
-                    if count > max_lines or count <= 0 then
-                        return { ok = false, reason = "too_large", count = count }
-                    end
-
-                    local save = vim.fn.winsaveview()
-                    local h = vim.api.nvim_win_get_height(0)
-                    for l = 1, count, h do
-                        vim.api.nvim_win_set_cursor(0, { l, 0 })
-                        vim.cmd("redraw")
-                    end
-                    vim.fn.winrestview(save)
-                    vim.cmd("redraw")
-                    return { ok = true, count = count }
-                    "#,
-                    vec![],
-                )
+                .exec_lua(include_str!("../../lua/test/test_prewarm.lua"), vec![])
                 .await
                 .expect("Failed to execute prewarm lua");
 
@@ -1022,15 +804,7 @@ mod tests {
                 .unwrap();
 
             let res2 = session
-                .exec_lua(
-                    r#"
-                    local max_lines = vim.g.zenvi_prewarm_max_lines
-                    if max_lines == nil then max_lines = 1000 end
-                    if max_lines <= 0 then return { ok = false, reason = "disabled" } end
-                    return { ok = true }
-                    "#,
-                    vec![],
-                )
+                .exec_lua(include_str!("../../lua/test/test_prewarm_disabled.lua"), vec![])
                 .await
                 .unwrap();
 
