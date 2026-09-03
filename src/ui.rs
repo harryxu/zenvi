@@ -486,14 +486,14 @@ impl Render for ZenviView {
                 .size_0(),
             )
             // Keyboard input
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, _cx| {
                 this.trigger_interaction();
                 #[cfg(not(target_os = "macos"))]
                 if this.is_menu_open {
                     let is_esc = event.keystroke.key == "escape" || event.keystroke.key == "Esc" || event.keystroke.key == "\u{1b}";
                     this.is_menu_open = false;
                     this.active_submenu = None;
-                    cx.notify();
+                    _cx.notify();
                     if is_esc {
                         return;
                     }
