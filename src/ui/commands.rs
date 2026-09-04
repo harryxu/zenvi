@@ -20,48 +20,7 @@ impl ZenviView {
             let mut cx = cx.clone();
             async move {
                 // 1. Check auto-session status and save session if active
-                let check_lua = r#"
-                    local ok, auto_session = pcall(require, "auto-session")
-                    if not ok or not auto_session then
-                        return { has_auto_session = false, should_restore = false, cwd = vim.fn.getcwd() }
-                    end
-
-                    local is_session_active = false
-                    local this_session = vim.v.this_session
-                    if this_session and this_session ~= "" then
-                        is_session_active = true
-                    else
-                        local lib_ok, lib = pcall(require, "auto-session.lib")
-                        if lib_ok and lib and lib.get_session_file_name then
-                            local sfile = lib.get_session_file_name()
-                            if sfile and vim.fn.filereadable(sfile) == 1 then
-                                is_session_active = true
-                            end
-                        end
-                    end
-
-                    -- Check if any named file buffers are currently open
-                    local bufs = vim.fn.getbufinfo({ buflisted = 1 })
-                    local has_valid_buffers = false
-                    for _, b in ipairs(bufs) do
-                        if b.name and b.name ~= "" then
-                            has_valid_buffers = true
-                            break
-                        end
-                    end
-
-                    local should_restore = false
-                    if is_session_active or has_valid_buffers then
-                        pcall(auto_session.save_session)
-                        should_restore = true
-                    end
-
-                    return {
-                        has_auto_session = true,
-                        should_restore = should_restore,
-                        cwd = vim.fn.getcwd(),
-                    }
-                "#;
+                let check_lua = include_str!("../../lua/commands/check_session.lua");
 
                 let (should_restore, current_cwd) =
                     match old_session.exec_lua(check_lua, vec![]).await {
@@ -110,16 +69,9 @@ impl ZenviView {
                         // 4. If auto-session was active, restore session in new instance
                         if should_restore {
                             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                            let restore_lua = r#"
-                                (function()
-                                    local ok, auto_session = pcall(require, "auto-session")
-                                    if ok and auto_session then
-                                        pcall(auto_session.restore_session)
-                                    end
-                                end)()
-                            "#;
-                            new_session
-                                .send_command(&format!("lua {}", restore_lua));
+                            const RESTORE_LUA: &str =
+                                concat!("lua ", include_str!("../../lua/commands/restore_session.lua"));
+                            new_session.send_command(RESTORE_LUA);
                         }
 
                         let _ = this.update(&mut cx, |this, cx| {
@@ -304,128 +256,14 @@ impl ZenviView {
     }
 
     pub fn close_buffer(&mut self, _cx: &mut Context<Self>) {
-        let lua_cmd = r##"lua (function()
-            local cur = vim.api.nvim_get_current_buf()
-            local bufs = vim.tbl_filter(function(b)
-                return vim.api.nvim_buf_is_valid(b) and vim.bo[b].buflisted
-            end, vim.api.nvim_list_bufs())
-
-            if #bufs <= 1 then
-                vim.cmd("confirm quit")
-                return
-            end
-
-            local alt = vim.fn.bufnr("#")
-            local next_buf = nil
-            if alt > 0 and alt ~= cur and vim.api.nvim_buf_is_valid(alt) and vim.bo[alt].buflisted then
-                next_buf = alt
-            else
-                for _, b in ipairs(bufs) do
-                    if b ~= cur then
-                        next_buf = b
-                        break
-                    end
-                end
-            end
-
-            if next_buf then
-                for _, w in ipairs(vim.api.nvim_list_wins()) do
-                    if vim.api.nvim_win_is_valid(w) and vim.api.nvim_win_get_buf(w) == cur then
-                        vim.api.nvim_win_set_buf(w, next_buf)
-                    end
-                end
-            end
-
-            vim.cmd("confirm bdelete " .. cur)
-        end)()"##;
-        self.session.send_command(lua_cmd);
+        const CLOSE_BUFFER_LUA: &str =
+            concat!("lua ", include_str!("../../lua/commands/close_buffer.lua"));
+        self.session.send_command(CLOSE_BUFFER_LUA);
     }
 
     pub fn show_about(&mut self, _cx: &mut Context<Self>) {
-        let lua_cmd = r#"lua (function()
-            local text = {
-                "",
-                "   ⚡ Zenvi - Standalone Neovim GUI Shell",
-                "   ──────────────────────────────────────",
-                "   Version : 0.1.0",
-                "   Engine  : Rust + GPUI",
-                "   Backend : Embedded Neovim (RPC)",
-                "",
-                "   A lightweight, GPU-accelerated desktop",
-                "   frontend for Neovim built with GPUI.",
-                "",
-                "   https://github.com/harryxu/zenvi",
-                "",
-                "   [ Press 'q' or <Esc> to close ]",
-                ""
-            }
-            local buf = vim.api.nvim_create_buf(false, true)
-            vim.api.nvim_buf_set_lines(buf, 0, -1, false, text)
-            vim.bo[buf].modifiable = false
-            vim.bo[buf].bufhidden = "wipe"
-            vim.bo[buf].buftype = "nofile"
-            vim.bo[buf].filetype = "zenvi_about"
-            vim.b[buf].scrollbar_disabled = true
-            vim.b[buf].satellite = false
-            vim.b[buf].minianimate_disable = true
-            vim.b[buf].miniindentscope_disable = true
-
-            local max_w = 0
-            for _, line in ipairs(text) do
-                max_w = math.max(max_w, vim.fn.strdisplaywidth(line))
-            end
-            local width = math.max(48, max_w + 4)
-            local height = #text
-            local ui = vim.api.nvim_list_uis()[1]
-            local screen_w = ui and ui.width or vim.o.columns
-            local screen_h = ui and ui.height or vim.o.lines
-
-            local row = math.max(1, math.floor((screen_h - height) / 2))
-            local col = math.max(1, math.floor((screen_w - width) / 2))
-
-            local win_opts = {
-                relative = "editor",
-                width = width,
-                height = height,
-                row = row,
-                col = col,
-                style = "minimal",
-                border = "rounded",
-                noautocmd = true,
-            }
-            pcall(function()
-                win_opts.title = " About Zenvi "
-                win_opts.title_pos = "center"
-            end)
-
-            local ok, win = pcall(vim.api.nvim_open_win, buf, true, win_opts)
-            if not ok then
-                vim.notify(table.concat(text, "\n"), vim.log.levels.INFO)
-                return
-            end
-
-            pcall(function()
-                vim.wo[win].wrap = false
-                vim.wo[win].cursorline = false
-                vim.wo[win].cursorcolumn = false
-                vim.wo[win].number = false
-                vim.wo[win].relativenumber = false
-                vim.wo[win].signcolumn = "no"
-                vim.wo[win].foldcolumn = "0"
-                vim.wo[win].statuscolumn = ""
-                vim.wo[win].winblend = 0
-            end)
-
-            local close = function()
-                if vim.api.nvim_win_is_valid(win) then
-                    pcall(vim.api.nvim_win_close, win, true)
-                end
-            end
-
-            vim.keymap.set("n", "q", close, { buffer = buf, nowait = true, silent = true })
-            vim.keymap.set("n", "<Esc>", close, { buffer = buf, nowait = true, silent = true })
-            vim.keymap.set("n", "<CR>", close, { buffer = buf, nowait = true, silent = true })
-        end)()"#;
-        self.session.send_command(lua_cmd);
+        const SHOW_ABOUT_LUA: &str =
+            concat!("lua ", include_str!("../../lua/commands/show_about.lua"));
+        self.session.send_command(SHOW_ABOUT_LUA);
     }
 }

@@ -1,7 +1,4 @@
-use super::style::derive_titlebar_style;
-#[cfg(not(target_os = "macos"))]
 use super::style::TitlebarStyle;
-use crate::nvim::state::NvimState;
 use crate::ui::{ZenviView, TITLEBAR_HEIGHT};
 use gpui::prelude::*;
 use gpui::*;
@@ -9,12 +6,15 @@ use gpui::*;
 /// Formats the raw Neovim title, preserving the active file path while branding the shell as Zenvi.
 pub fn format_title(raw_title: &str) -> String {
     let t = raw_title.trim();
-    if t.is_empty() || t == "Nvim" || t == "nvim" || t == "NVIM" {
+    if t.is_empty() || t.eq_ignore_ascii_case("nvim") {
         "Zenvi".to_string()
+    } else if let Some(prefix) = t.strip_suffix(" - NVIM")
+        .or_else(|| t.strip_suffix(" - Nvim"))
+        .or_else(|| t.strip_suffix(" - nvim"))
+    {
+        format!("{prefix} - Zenvi")
     } else {
-        t.replace(" - NVIM", " - Zenvi")
-            .replace(" - Nvim", " - Zenvi")
-            .replace(" - nvim", " - Zenvi")
+        t.to_string()
     }
 }
 
@@ -178,18 +178,16 @@ fn render_window_controls(
         .child(close_btn)
 }
 
-/// Builds the custom titlebar element directly from Neovim's state.
+/// Builds the custom titlebar element using precomputed title and style.
 pub fn render_titlebar(
-    state: &NvimState,
+    title: &str,
+    style: &TitlebarStyle,
+    default_bg: u32,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] is_menu_open: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] borderless: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] window: &Window,
     cx: &mut Context<ZenviView>,
 ) -> Stateful<Div> {
-    let title = format_title(&state.title);
-    let style = derive_titlebar_style(state.default_bg, state.default_fg);
-    let default_bg = state.default_bg;
-
     let left_side = div()
         .flex()
         .flex_row()
@@ -197,14 +195,14 @@ pub fn render_titlebar(
         .gap(px(8.0));
 
     #[cfg(not(target_os = "macos"))]
-    let left_side = left_side.child(render_menu_button(is_menu_open, &style, cx));
+    let left_side = left_side.child(render_menu_button(is_menu_open, style, cx));
 
     let left_side = left_side.child(
         div()
             .text_size(px(12.0))
             .font_weight(FontWeight::BOLD)
             .text_color(style.title_color)
-            .child(title),
+            .child(title.to_string()),
     );
 
     let bar = div()

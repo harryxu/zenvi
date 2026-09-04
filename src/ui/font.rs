@@ -237,22 +237,24 @@ impl ZenviView {
         self.line_height = px(final_lh);
     }
 
-    /// Checks if Neovim's guifont or linespace has changed and updates font metrics accordingly.
-    pub fn sync_font_if_changed(&mut self, cx: &App) {
-        let (guifont_changed, new_guifont, new_linespace) = {
-            let state = self.session.state.read();
-            if state.guifont != self.last_guifont || state.linespace != self.last_linespace {
-                (true, state.guifont.clone(), state.linespace)
-            } else {
-                (false, String::new(), 0)
-            }
-        };
-
-        if guifont_changed {
-            self.last_guifont = new_guifont.clone();
-            self.last_linespace = new_linespace;
-            self.update_font(&new_guifont, new_linespace, cx);
+    /// Checks if Neovim's guifont or linespace has changed (using already-read state) and updates metrics.
+    #[inline]
+    pub fn sync_font_from_state(&mut self, guifont: &str, linespace: i64, cx: &App) {
+        if guifont != self.last_guifont || linespace != self.last_linespace {
+            self.last_guifont = guifont.to_string();
+            self.last_linespace = linespace;
+            self.update_font(guifont, linespace, cx);
         }
+    }
+
+    /// Checks if Neovim's guifont or linespace has changed and updates font metrics accordingly.
+    #[allow(dead_code)]
+    pub fn sync_font_if_changed(&mut self, cx: &App) {
+        let (guifont, linespace) = {
+            let state = self.session.state.read();
+            (state.guifont.clone(), state.linespace)
+        };
+        self.sync_font_from_state(&guifont, linespace, cx);
     }
 }
 

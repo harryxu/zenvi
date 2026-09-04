@@ -20,10 +20,10 @@ pub enum RpcMessage {
 
 impl RpcMessage {
     pub fn parse(val: Value) -> Option<Self> {
-        let arr = val.as_array()?;
-        if arr.is_empty() {
-            return None;
-        }
+        let mut arr = match val {
+            Value::Array(arr) if !arr.is_empty() => arr,
+            _ => return None,
+        };
 
         let msg_type = arr[0].as_u64()?;
         match msg_type {
@@ -31,9 +31,18 @@ impl RpcMessage {
                 if arr.len() < 4 {
                     return None;
                 }
-                let msgid = arr[1].as_u64()? as u32;
-                let method = arr[2].as_str()?.to_string();
-                let params = arr[3].as_array()?.clone();
+                let params_val = arr.swap_remove(3);
+                let method_val = arr.swap_remove(2);
+                let msgid_val = arr.swap_remove(1);
+                let msgid = msgid_val.as_u64()? as u32;
+                let method = match method_val {
+                    Value::String(s) => s.into_str()?,
+                    _ => return None,
+                };
+                let params = match params_val {
+                    Value::Array(a) => a,
+                    _ => return None,
+                };
                 Some(RpcMessage::Request {
                     msgid,
                     method,
@@ -44,9 +53,10 @@ impl RpcMessage {
                 if arr.len() < 4 {
                     return None;
                 }
-                let msgid = arr[1].as_u64()? as u32;
-                let error = arr[2].clone();
-                let result = arr[3].clone();
+                let result = arr.swap_remove(3);
+                let error = arr.swap_remove(2);
+                let msgid_val = arr.swap_remove(1);
+                let msgid = msgid_val.as_u64()? as u32;
                 Some(RpcMessage::Response {
                     msgid,
                     error,
@@ -57,15 +67,23 @@ impl RpcMessage {
                 if arr.len() < 3 {
                     return None;
                 }
-                let method = arr[2-1].as_str()?.to_string(); // index 1 is method
-                let params = arr[2].as_array()?.clone();
+                let params_val = arr.swap_remove(2);
+                let method_val = arr.swap_remove(1);
+                let method = match method_val {
+                    Value::String(s) => s.into_str()?,
+                    _ => return None,
+                };
+                let params = match params_val {
+                    Value::Array(a) => a,
+                    _ => return None,
+                };
                 Some(RpcMessage::Notification { method, params })
             }
             _ => None,
         }
     }
 
-    pub fn to_value(&self) -> Value {
+    pub fn into_value(self) -> Value {
         match self {
             RpcMessage::Request {
                 msgid,
@@ -73,9 +91,9 @@ impl RpcMessage {
                 params,
             } => Value::Array(vec![
                 Value::from(0),
-                Value::from(*msgid),
-                Value::from(method.clone()),
-                Value::Array(params.clone()),
+                Value::from(msgid),
+                Value::from(method),
+                Value::Array(params),
             ]),
             RpcMessage::Response {
                 msgid,
@@ -83,14 +101,14 @@ impl RpcMessage {
                 result,
             } => Value::Array(vec![
                 Value::from(1),
-                Value::from(*msgid),
-                error.clone(),
-                result.clone(),
+                Value::from(msgid),
+                error,
+                result,
             ]),
             RpcMessage::Notification { method, params } => Value::Array(vec![
                 Value::from(2),
-                Value::from(method.clone()),
-                Value::Array(params.clone()),
+                Value::from(method),
+                Value::Array(params),
             ]),
         }
     }
@@ -238,7 +256,7 @@ mod tests {
             method: "nvim_input".to_string(),
             params: vec![Value::from("<Esc>")],
         };
-        let req_val = req.to_value();
+        let req_val = req.into_value();
         let parsed_req = RpcMessage::parse(req_val).expect("Roundtrip request failed");
         match parsed_req {
             RpcMessage::Request {
@@ -259,7 +277,7 @@ mod tests {
             error: Value::Nil,
             result: Value::from(true),
         };
-        let resp_val = resp.to_value();
+        let resp_val = resp.into_value();
         let parsed_resp = RpcMessage::parse(resp_val).expect("Roundtrip response failed");
         match parsed_resp {
             RpcMessage::Response {
@@ -279,7 +297,7 @@ mod tests {
             method: "redraw".to_string(),
             params: vec![Value::from(1), Value::from(2)],
         };
-        let notif_val = notif.to_value();
+        let notif_val = notif.into_value();
         let parsed_notif = RpcMessage::parse(notif_val).expect("Roundtrip notification failed");
         match parsed_notif {
             RpcMessage::Notification { method, params } => {

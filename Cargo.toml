@@ -25,3 +25,10 @@ usvg = "0.44"
 [profile.dev.package."*"]
 opt-level = 3
 
+[workspace]
+members = [
+    ".",
+    "perf_test_gpui",
+]
+
+

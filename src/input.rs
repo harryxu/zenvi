@@ -37,78 +37,129 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
         }
     }
 
-    let key_lower = raw_key.to_lowercase();
-    let key = key_lower.as_str();
+    // Ignore standalone modifier key press/release events without allocating String
+    let is_standalone_modifier = match raw_key.len() {
+        2 => raw_key.eq_ignore_ascii_case("fn"),
+        3 => raw_key.eq_ignore_ascii_case("alt") || raw_key.eq_ignore_ascii_case("cmd"),
+        4 => raw_key.eq_ignore_ascii_case("ctrl") || raw_key.eq_ignore_ascii_case("meta"),
+        5 => raw_key.eq_ignore_ascii_case("shift") || raw_key.eq_ignore_ascii_case("super"),
+        _ => {
+            raw_key.eq_ignore_ascii_case("shift_l")
+                || raw_key.eq_ignore_ascii_case("shift_r")
+                || raw_key.eq_ignore_ascii_case("control")
+                || raw_key.eq_ignore_ascii_case("control_l")
+                || raw_key.eq_ignore_ascii_case("control_r")
+                || raw_key.eq_ignore_ascii_case("alt_l")
+                || raw_key.eq_ignore_ascii_case("alt_r")
+                || raw_key.eq_ignore_ascii_case("meta_l")
+                || raw_key.eq_ignore_ascii_case("meta_r")
+                || raw_key.eq_ignore_ascii_case("super_l")
+                || raw_key.eq_ignore_ascii_case("super_r")
+                || raw_key.eq_ignore_ascii_case("command")
+                || raw_key.eq_ignore_ascii_case("platform")
+                || raw_key.eq_ignore_ascii_case("capslock")
+                || raw_key.eq_ignore_ascii_case("caps_lock")
+                || raw_key.eq_ignore_ascii_case("numlock")
+                || raw_key.eq_ignore_ascii_case("num_lock")
+                || raw_key.eq_ignore_ascii_case("scrolllock")
+                || raw_key.eq_ignore_ascii_case("scroll_lock")
+                || raw_key.eq_ignore_ascii_case("function")
+                || raw_key.eq_ignore_ascii_case("iso_level3_shift")
+                || raw_key.eq_ignore_ascii_case("mode_switch")
+        }
+    };
 
-    // Ignore standalone modifier key press/release events
-    match key {
-        "shift"
-        | "shift_l"
-        | "shift_r"
-        | "control"
-        | "ctrl"
-        | "control_l"
-        | "control_r"
-        | "alt"
-        | "alt_l"
-        | "alt_r"
-        | "meta"
-        | "meta_l"
-        | "meta_r"
-        | "super"
-        | "super_l"
-        | "super_r"
-        | "command"
-        | "cmd"
-        | "platform"
-        | "capslock"
-        | "caps_lock"
-        | "numlock"
-        | "num_lock"
-        | "scrolllock"
-        | "scroll_lock"
-        | "fn"
-        | "function"
-        | "iso_level3_shift"
-        | "mode_switch" => return None,
-        _ => {}
+    if is_standalone_modifier {
+        return None;
     }
 
-    // Map special key names to Neovim equivalents
-    let special_name = match key {
-        "enter" | "return" | "\r" | "\n" => Some("CR"),
-        "escape" | "esc" | "\x1b" => Some("Esc"),
-        "backspace" | "bs" | "\x08" | "\u{7f}" => Some("BS"),
-        "tab" | "\t" => Some("Tab"),
-        "space" => Some("Space"),
-        "up" => Some("Up"),
-        "down" => Some("Down"),
-        "left" => Some("Left"),
-        "right" => Some("Right"),
-        "pageup" | "page_up" => Some("PageUp"),
-        "pagedown" | "page_down" => Some("PageDown"),
-        "home" => Some("Home"),
-        "end" => Some("End"),
-        "insert" => Some("Insert"),
-        "delete" | "del" => Some("Del"),
-        "f1" => Some("F1"),
-        "f2" => Some("F2"),
-        "f3" => Some("F3"),
-        "f4" => Some("F4"),
-        "f5" => Some("F5"),
-        "f6" => Some("F6"),
-        "f7" => Some("F7"),
-        "f8" => Some("F8"),
-        "f9" => Some("F9"),
-        "f10" => Some("F10"),
-        "f11" => Some("F11"),
-        "f12" => Some("F12"),
-        "<" => Some("lt"),
-        _ => None,
+    // Map special key names to Neovim equivalents (without allocating a lowercased String)
+    let special_name = if raw_key.eq_ignore_ascii_case("enter") || raw_key.eq_ignore_ascii_case("return") || raw_key == "\r" || raw_key == "\n" {
+        Some("CR")
+    } else if raw_key.eq_ignore_ascii_case("escape") || raw_key.eq_ignore_ascii_case("esc") || raw_key == "\x1b" {
+        Some("Esc")
+    } else if raw_key.eq_ignore_ascii_case("backspace") || raw_key.eq_ignore_ascii_case("bs") || raw_key == "\x08" || raw_key == "\u{7f}" {
+        Some("BS")
+    } else if raw_key.eq_ignore_ascii_case("tab") || raw_key == "\t" {
+        Some("Tab")
+    } else if raw_key.eq_ignore_ascii_case("space") {
+        Some("Space")
+    } else if raw_key.eq_ignore_ascii_case("up") {
+        Some("Up")
+    } else if raw_key.eq_ignore_ascii_case("down") {
+        Some("Down")
+    } else if raw_key.eq_ignore_ascii_case("left") {
+        Some("Left")
+    } else if raw_key.eq_ignore_ascii_case("right") {
+        Some("Right")
+    } else if raw_key.eq_ignore_ascii_case("pageup") || raw_key.eq_ignore_ascii_case("page_up") {
+        Some("PageUp")
+    } else if raw_key.eq_ignore_ascii_case("pagedown") || raw_key.eq_ignore_ascii_case("page_down") {
+        Some("PageDown")
+    } else if raw_key.eq_ignore_ascii_case("home") {
+        Some("Home")
+    } else if raw_key.eq_ignore_ascii_case("end") {
+        Some("End")
+    } else if raw_key.eq_ignore_ascii_case("insert") {
+        Some("Insert")
+    } else if raw_key.eq_ignore_ascii_case("delete") || raw_key.eq_ignore_ascii_case("del") {
+        Some("Del")
+    } else if raw_key.eq_ignore_ascii_case("f1") {
+        Some("F1")
+    } else if raw_key.eq_ignore_ascii_case("f2") {
+        Some("F2")
+    } else if raw_key.eq_ignore_ascii_case("f3") {
+        Some("F3")
+    } else if raw_key.eq_ignore_ascii_case("f4") {
+        Some("F4")
+    } else if raw_key.eq_ignore_ascii_case("f5") {
+        Some("F5")
+    } else if raw_key.eq_ignore_ascii_case("f6") {
+        Some("F6")
+    } else if raw_key.eq_ignore_ascii_case("f7") {
+        Some("F7")
+    } else if raw_key.eq_ignore_ascii_case("f8") {
+        Some("F8")
+    } else if raw_key.eq_ignore_ascii_case("f9") {
+        Some("F9")
+    } else if raw_key.eq_ignore_ascii_case("f10") {
+        Some("F10")
+    } else if raw_key.eq_ignore_ascii_case("f11") {
+        Some("F11")
+    } else if raw_key.eq_ignore_ascii_case("f12") {
+        Some("F12")
+    } else if raw_key == "<" {
+        Some("lt")
+    } else {
+        None
     };
 
     if let Some(name) = special_name {
-        let mut prefix = String::new();
+        let is_space_or_lt = raw_key.eq_ignore_ascii_case("space") || raw_key == "<";
+        let has_shift = shift && !is_space_or_lt;
+        if !ctrl && !alt && !cmd && !has_shift {
+            return Some(match name {
+                "CR" => "<CR>".to_string(),
+                "Esc" => "<Esc>".to_string(),
+                "BS" => "<BS>".to_string(),
+                "Tab" => "<Tab>".to_string(),
+                "Space" => "<Space>".to_string(),
+                "Up" => "<Up>".to_string(),
+                "Down" => "<Down>".to_string(),
+                "Left" => "<Left>".to_string(),
+                "Right" => "<Right>".to_string(),
+                "PageUp" => "<PageUp>".to_string(),
+                "PageDown" => "<PageDown>".to_string(),
+                "Home" => "<Home>".to_string(),
+                "End" => "<End>".to_string(),
+                "Insert" => "<Insert>".to_string(),
+                "Del" => "<Del>".to_string(),
+                "lt" => "<lt>".to_string(),
+                _ => format!("<{name}>"),
+            });
+        }
+
+        let mut prefix = String::with_capacity(8);
         if ctrl {
             prefix.push_str("C-");
         }
@@ -118,7 +169,7 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
         if cmd {
             prefix.push_str("D-");
         }
-        if shift && (key != "space" && key != "<") {
+        if has_shift {
             prefix.push_str("S-");
         }
         return Some(format!("<{}{}>", prefix, name));
@@ -126,7 +177,7 @@ pub fn key_event_to_nvim(event: &KeyDownEvent) -> Option<String> {
 
     // Single character with modifiers (Ctrl, Alt, Cmd)
     if ctrl || alt || cmd {
-        let mut prefix = String::new();
+        let mut prefix = String::with_capacity(8);
         if ctrl {
             prefix.push_str("C-");
         }
