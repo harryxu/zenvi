@@ -28,6 +28,7 @@ pub fn init_menus(cx: &mut App) {
                     GpuiMenuItem::separator(),
                     GpuiMenuItem::action("Quit Zenvi", Quit),
                 ],
+                disabled: false,
             },
             Menu {
                 name: "File".into(),
@@ -39,6 +40,7 @@ pub fn init_menus(cx: &mut App) {
                     GpuiMenuItem::separator(),
                     GpuiMenuItem::action("Close Window", CloseBuffer),
                 ],
+                disabled: false,
             },
             Menu {
                 name: "Edit".into(),
@@ -51,6 +53,7 @@ pub fn init_menus(cx: &mut App) {
                     GpuiMenuItem::action("Paste", Paste),
                     GpuiMenuItem::action("Select All", SelectAll),
                 ],
+                disabled: false,
             },
         ]);
     }
@@ -74,6 +77,7 @@ pub fn init_menus(cx: &mut App) {
                     GpuiMenuItem::separator(),
                     GpuiMenuItem::action("Exit", Quit),
                 ],
+                disabled: false,
             },
             Menu {
                 name: "Edit".into(),
@@ -86,6 +90,7 @@ pub fn init_menus(cx: &mut App) {
                     GpuiMenuItem::action("Paste", Paste),
                     GpuiMenuItem::action("Select All", SelectAll),
                 ],
+                disabled: false,
             },
         ]);
     }

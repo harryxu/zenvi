@@ -222,6 +222,7 @@ mod tests {
                 key_char: None,
             },
             is_held: false,
+            prefer_character_input: false,
         }
     }
 

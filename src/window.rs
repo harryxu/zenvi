@@ -221,7 +221,7 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, borderless
         let window_handle = window.window_handle();
         let view = cx.new(|cx| {
             let view = ZenviView::with_cwd_and_targets(window_handle, cwd, targets, borderless, cx);
-            window.focus(&view.focus_handle);
+            window.focus(&view.focus_handle, cx);
             view
         });
 

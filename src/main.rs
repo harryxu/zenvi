@@ -27,7 +27,7 @@ fn main() {
 
     let (open_urls_tx, mut open_urls_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<String>>();
 
-    let app = Application::new().with_assets(assets::Assets);
+    let app = gpui_platform::application().with_assets(assets::Assets);
     let tx = open_urls_tx.clone();
     app.on_open_urls(move |urls: Vec<String>| {
         let _ = tx.send(urls);
