@@ -233,6 +233,15 @@ impl NvimSession {
                                                 state_clone.write().is_prewarming = false;
                                                 let _ = event_tx_clone.send(NvimEvent::Redraw);
                                             }
+                                            "zenvi_left_panel_state" | "zenvi_panel_state" => {
+                                                if let Some(open) = params.first().and_then(|v| v.as_bool()) {
+                                                    let mut s = state_clone.write();
+                                                    if s.is_left_panel_open != open {
+                                                        s.is_left_panel_open = open;
+                                                        let _ = event_tx_clone.send(NvimEvent::Redraw);
+                                                    }
+                                                }
+                                            }
                                             _ => {}
                                         }
                                     }

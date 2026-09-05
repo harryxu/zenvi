@@ -266,4 +266,14 @@ impl ZenviView {
             concat!("lua ", include_str!("../../lua/commands/show_about.lua"));
         self.session.send_command(SHOW_ABOUT_LUA);
     }
+
+    pub fn toggle_left_panel(&mut self, _cx: &mut Context<Self>) {
+        self.session.send_command(
+            r#"lua (function()
+            if _G.zenvi and _G.zenvi.toggle_left_panel then
+                _G.zenvi.toggle_left_panel()
+            end
+        end)()"#,
+        );
+    }
 }

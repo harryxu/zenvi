@@ -178,11 +178,49 @@ fn render_window_controls(
         .child(close_btn)
 }
 
+/// Renders the left panel toggle button on the right side of the titlebar.
+fn render_left_panel_button(
+    is_panel_open: bool,
+    style: &TitlebarStyle,
+    cx: &mut Context<ZenviView>,
+) -> impl IntoElement {
+    let icon_path = if is_panel_open {
+        "icons/panel-left-open.svg"
+    } else {
+        "icons/panel-left.svg"
+    };
+
+    div()
+        .id("panel-left-btn-toggle")
+        .flex()
+        .items_center()
+        .justify_center()
+        .px(px(6.0))
+        .py(px(4.0))
+        .rounded_sm()
+        .cursor_pointer()
+        .hover(move |s| s.bg(style.menu_hover_bg))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, _window, cx| {
+                cx.stop_propagation();
+                this.toggle_left_panel(cx);
+            }),
+        )
+        .child(
+            svg()
+                .path(icon_path)
+                .size(px(16.0))
+                .text_color(style.title_color),
+        )
+}
+
 /// Builds the custom titlebar element using precomputed title and style.
 pub fn render_titlebar(
     title: &str,
     style: &TitlebarStyle,
     default_bg: u32,
+    is_left_panel_open: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] is_menu_open: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] borderless: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] window: &Window,
@@ -204,6 +242,8 @@ pub fn render_titlebar(
             .text_color(style.title_color)
             .child(title.to_string()),
     );
+
+    let panel_button = render_left_panel_button(is_left_panel_open, style, cx);
 
     let bar = div()
         .id("zenvi-titlebar")
@@ -231,16 +271,28 @@ pub fn render_titlebar(
                 }
             }),
         )
-        .child(left_side);
+        .child(left_side)
+        .child(panel_button);
 
     #[cfg(not(target_os = "macos"))]
     let bar = {
         let is_maximized = window.is_maximized();
-        let right_side = if borderless {
+        let window_controls = if borderless {
             Some(render_window_controls(default_bg, &style, window, cx))
         } else {
             None
         };
+
+        let right_side = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .child(
+                div()
+                    .pr(if borderless { px(8.0) } else { px(0.0) })
+                    .child(panel_button),
+            )
+            .children(window_controls);
 
         let bar = bar
             .pl(px(8.0))
@@ -260,7 +312,7 @@ pub fn render_titlebar(
                 }),
             )
             .child(left_side)
-            .children(right_side);
+            .child(right_side);
 
         if borderless {
             bar.window_control_area(WindowControlArea::Drag)

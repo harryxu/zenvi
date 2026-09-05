@@ -486,6 +486,8 @@ pub struct NvimState {
     /// Indicates whether Neovim is executing a background idle prewarm sweep.
     /// During prewarming, visual rendering remains frozen to prevent screen flicker.
     pub is_prewarming: bool,
+    /// Indicates whether the Neovim left panel (e.g. neo-tree or custom panel) is currently open.
+    pub is_left_panel_open: bool,
 }
 
 impl NvimState {
@@ -527,6 +529,7 @@ impl Default for NvimState {
             guifont: String::new(),
             linespace: 0,
             is_prewarming: false,
+            is_left_panel_open: false,
         }
     }
 }
@@ -575,6 +578,7 @@ mod tests {
         assert_eq!(state.current_mode, "normal");
         assert_eq!(state.active_grid, 1);
         assert!(state.grids.contains_key(&1));
+        assert!(!state.is_left_panel_open);
         let grid = state.grids.get(&1).unwrap();
         assert_eq!(grid.width, 80);
         assert_eq!(grid.height, 24);
