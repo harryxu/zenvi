@@ -557,16 +557,16 @@ pub fn render_grid(
                                     bounds.left() + px(seg.col_start as f32 * char_width),
                                     y,
                                 );
-                                let _ = seg.shaped_line.paint_background(origin, line_height, window, cx);
-                                let _ = seg.shaped_line.paint(origin, line_height, window, cx);
+                                let _ = seg.shaped_line.paint_background(origin, line_height, TextAlign::Left, None, window, cx);
+                                let _ = seg.shaped_line.paint(origin, line_height, TextAlign::Left, None, window, cx);
                             }
                             if let Some(ref seg) = cached.seg2 {
                                 let origin = Point::new(
                                     bounds.left() + px(seg.col_start as f32 * char_width),
                                     y,
                                 );
-                                let _ = seg.shaped_line.paint_background(origin, line_height, window, cx);
-                                let _ = seg.shaped_line.paint(origin, line_height, window, cx);
+                                let _ = seg.shaped_line.paint_background(origin, line_height, TextAlign::Left, None, window, cx);
+                                let _ = seg.shaped_line.paint(origin, line_height, TextAlign::Left, None, window, cx);
                             }
                         }
                     }

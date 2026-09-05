@@ -82,7 +82,7 @@ impl ZenviView {
             self.is_menu_open = false;
             self.active_submenu = None;
         }
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         self.trigger_interaction();
         let (col, row) = self.pos_to_grid(position);
         if button == "left" {

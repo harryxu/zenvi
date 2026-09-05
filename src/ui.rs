@@ -201,16 +201,11 @@ impl ZenviView {
                             let Some(entity) = this.upgrade() else {
                                 break;
                             };
-                            if entity
-                                .update(&mut cx, |this, cx| {
-                                    this.trigger_interaction();
-                                    this.release_drag_backpressure(cx);
-                                    cx.notify();
-                                })
-                                .is_err()
-                            {
-                                break;
-                            }
+                            entity.update(&mut cx, |this, cx| {
+                                this.trigger_interaction();
+                                this.release_drag_backpressure(cx);
+                                cx.notify();
+                            });
                         }
                         NvimEvent::Exit => {
                             should_exit = true;
@@ -674,6 +669,7 @@ impl Render for ZenviView {
                                 blur_radius: px(2.0),
                                 spread_radius: px(0.0),
                                 offset: point(px(0.0), px(1.0)),
+                                inset: false,
                             },
                             // Compact soft ambient shadow (matching Zed's subtle shadow)
                             BoxShadow {
@@ -686,6 +682,7 @@ impl Render for ZenviView {
                                 blur_radius: px(4.5),
                                 spread_radius: px(0.0),
                                 offset: point(px(0.0), px(1.5)),
+                                inset: false,
                             },
                             // Light soft feather edge
                             BoxShadow {
@@ -698,6 +695,7 @@ impl Render for ZenviView {
                                 blur_radius: px(8.0),
                                 spread_radius: px(0.5),
                                 offset: point(px(0.0), px(2.0)),
+                                inset: false,
                             },
                         ])
                         .overflow_hidden(),
