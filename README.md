@@ -17,7 +17,7 @@
 - **Theme Synchronization** — Titlebar, borders, and menus dynamically derive colors from Neovim's active colorscheme.
 - **CLI Integration** — Install `zenvi` command via menu (`Zenvi -> Install Shell Command`), then open files or directories from terminal (`zenvi .`, `zenvi file.rs`).
 - **Neovim Hot Reload** — Reload Neovim session via `Zenvi -> Reload Neovim` or `Cmd+Shift+R`. Supports [auto-session](https://github.com/rmagatti/auto-session) state save/restore.
-- **Collapsible Left Panel** — Dedicated titlebar toggle button to open and close Neovim's left panel (defaults to [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim) or your own custom panel function), with bidirectional state synchronization.
+- **Collapsible Panels** — Dedicated titlebar toggle buttons for left and right panels with dynamic icon states and bidirectional synchronization. Left panel defaults to [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim) or custom functions, while right panel supports custom functions.
 - **`guifont` Support** — Set font via `vim.opt.guifont` in `init.lua`. Injects `vim.g.zenvi = true` and `vim.g.gui_running = 1` on startup.
 
 ---
@@ -46,7 +46,7 @@ You can also change fonts dynamically at runtime inside Neovim:
 Zenvi provides a left panel toggle button on the right side of the titlebar. The button dynamically switches icons (`panel-left` vs `panel-left-open`) based on whether the panel is currently open.
 
 #### Default Behavior
-If no custom function is specified, Zenvi defaults to toggling **[neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim)** (`neo-tree.command.execute({ toggle = true, position = "left" })`). If `neo-tree` is not installed, clicking the button has no effect.
+If no custom function is specified, Zenvi defaults to toggling **[neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim)** (`neo-tree.command.execute({ toggle = true, position = "left" })`). If `neo-tree` is not installed and no custom function is set, a helpful notification warning is displayed via `vim.notify`.
 
 #### Built-in API & Commands
 - **Lua function**: `zenvi.toggle_left_panel()`
@@ -68,6 +68,39 @@ if vim.g.zenvi then
   -- Optional: Define custom state detection (returns boolean)
   vim.g.zenvi_is_left_panel_open = function()
     return require("nvim-tree.api").tree.is_visible()
+  end
+end
+```
+
+### 🗂️ Right Panel Toggle (`toggle_right_panel`)
+
+Zenvi provides a right panel toggle button on the right side of the titlebar next to the left panel button. The button dynamically switches icons (`panel-right` vs `panel-right-open`) based on whether the panel is currently open.
+
+#### Behavior & Notification
+The right panel has no hardcoded default plugin. If clicked when no custom toggle function is defined, a notification warning is displayed prompting you to set `vim.g.zenvi_toggle_right_panel`.
+
+#### Built-in API & Commands
+- **Lua function**: `zenvi.toggle_right_panel()`
+- **Ex command**: `:ZenviToggleRightPanel`
+- **State query**: `zenvi.is_right_panel_open()`
+
+#### Configuration Example
+In your `init.lua`:
+
+```lua
+if vim.g.zenvi then
+  -- Define custom toggle logic (Lua function or Ex command string)
+  vim.g.zenvi_toggle_right_panel = function()
+    -- Example: toggle an outline or symbol inspector plugin
+    require("aerial").toggle()
+  end
+  -- Or as an Ex command string:
+  -- vim.g.zenvi_toggle_right_panel = "AerialToggle"
+
+  -- Optional: Define custom state detection (returns boolean)
+  vim.g.zenvi_is_right_panel_open = function()
+    -- Return true if the panel is currently open, false otherwise
+    return false
   end
 end
 ```

@@ -488,6 +488,8 @@ pub struct NvimState {
     pub is_prewarming: bool,
     /// Indicates whether the Neovim left panel (e.g. neo-tree or custom panel) is currently open.
     pub is_left_panel_open: bool,
+    /// Indicates whether the Neovim right panel (e.g. custom panel) is currently open.
+    pub is_right_panel_open: bool,
 }
 
 impl NvimState {
@@ -530,6 +532,7 @@ impl Default for NvimState {
             linespace: 0,
             is_prewarming: false,
             is_left_panel_open: false,
+            is_right_panel_open: false,
         }
     }
 }
@@ -579,6 +582,7 @@ mod tests {
         assert_eq!(state.active_grid, 1);
         assert!(state.grids.contains_key(&1));
         assert!(!state.is_left_panel_open);
+        assert!(!state.is_right_panel_open);
         let grid = state.grids.get(&1).unwrap();
         assert_eq!(grid.width, 80);
         assert_eq!(grid.height, 24);

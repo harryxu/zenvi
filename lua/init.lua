@@ -204,10 +204,66 @@
                 pcall(neotree.execute, { toggle = true, position = "left" })
             elseif vim.fn.exists(":Neotree") == 2 then
                 pcall(vim.cmd, "Neotree toggle left")
+            else
+                vim.notify(
+                    "Zenvi: neo-tree is not installed and no vim.g.zenvi_toggle_left_panel is configured.",
+                    vim.log.levels.WARN
+                )
             end
         end
 
         vim.schedule(notify_left_panel_state)
+    end
+
+    local function is_right_panel_open()
+        if type(vim.g.zenvi_is_right_panel_open) == "function" then
+            local ok, res = pcall(vim.g.zenvi_is_right_panel_open)
+            if ok then return not not res end
+        elseif type(vim.g.zenvi_is_right_panel_open) == "boolean" then
+            return vim.g.zenvi_is_right_panel_open
+        end
+
+        if type(_G.zenvi_is_right_panel_open) == "function" then
+            local ok, res = pcall(_G.zenvi_is_right_panel_open)
+            if ok then return not not res end
+        end
+
+        if type(zenvi.custom_is_right_panel_open) == "function" then
+            local ok, res = pcall(zenvi.custom_is_right_panel_open)
+            if ok then return not not res end
+        end
+
+        return false
+    end
+
+    local function notify_right_panel_state()
+        local open = is_right_panel_open()
+        pcall(vim.rpcnotify, 1, "zenvi_right_panel_state", open)
+    end
+
+    local function toggle_right_panel()
+        local custom_fn = nil
+        if type(vim.g.zenvi_toggle_right_panel) == "function" then
+            custom_fn = vim.g.zenvi_toggle_right_panel
+        elseif type(vim.g.zenvi_toggle_right_panel) == "string" then
+            local cmd = vim.g.zenvi_toggle_right_panel
+            custom_fn = function() vim.cmd(cmd) end
+        elseif type(_G.zenvi_toggle_right_panel) == "function" then
+            custom_fn = _G.zenvi_toggle_right_panel
+        elseif type(zenvi.custom_toggle_right_panel) == "function" then
+            custom_fn = zenvi.custom_toggle_right_panel
+        end
+
+        if custom_fn then
+            pcall(custom_fn)
+        else
+            vim.notify(
+                "Zenvi: No right panel toggle function configured. Please set vim.g.zenvi_toggle_right_panel in your config.",
+                vim.log.levels.WARN
+            )
+        end
+
+        vim.schedule(notify_right_panel_state)
     end
 
     zenvi.is_left_panel_open = is_left_panel_open
@@ -215,17 +271,31 @@
     zenvi.toggle_panel = toggle_left_panel
     zenvi.notify_left_panel_state = notify_left_panel_state
 
+    zenvi.is_right_panel_open = is_right_panel_open
+    zenvi.toggle_right_panel = toggle_right_panel
+    zenvi.notify_right_panel_state = notify_right_panel_state
+
     pcall(vim.api.nvim_create_user_command, "ZenviToggleLeftPanel", function()
         zenvi.toggle_left_panel()
     end, { desc = "Toggle Zenvi left panel" })
 
-    local panel_group = vim.api.nvim_create_augroup("ZenviLeftPanelGroup", { clear = true })
+    pcall(vim.api.nvim_create_user_command, "ZenviToggleRightPanel", function()
+        zenvi.toggle_right_panel()
+    end, { desc = "Toggle Zenvi right panel" })
+
+    local panel_group = vim.api.nvim_create_augroup("ZenviPanelGroup", { clear = true })
     vim.api.nvim_create_autocmd({ "BufWinEnter", "BufWinLeave", "WinClosed", "TabEnter" }, {
         group = panel_group,
         callback = function()
-            vim.schedule(notify_left_panel_state)
+            vim.schedule(function()
+                notify_left_panel_state()
+                notify_right_panel_state()
+            end)
         end,
     })
 
-    vim.defer_fn(notify_left_panel_state, 100)
+    vim.defer_fn(function()
+        notify_left_panel_state()
+        notify_right_panel_state()
+    end, 100)
 end)()

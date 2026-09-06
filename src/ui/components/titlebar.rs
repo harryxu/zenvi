@@ -215,12 +215,50 @@ fn render_left_panel_button(
         )
 }
 
+/// Renders the right panel toggle button on the right side of the titlebar.
+fn render_right_panel_button(
+    is_panel_open: bool,
+    style: &TitlebarStyle,
+    cx: &mut Context<ZenviView>,
+) -> impl IntoElement {
+    let icon_path = if is_panel_open {
+        "icons/panel-right-open.svg"
+    } else {
+        "icons/panel-right.svg"
+    };
+
+    div()
+        .id("panel-right-btn-toggle")
+        .flex()
+        .items_center()
+        .justify_center()
+        .px(px(6.0))
+        .py(px(4.0))
+        .rounded_sm()
+        .cursor_pointer()
+        .hover(move |s| s.bg(style.menu_hover_bg))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, _window, cx| {
+                cx.stop_propagation();
+                this.toggle_right_panel(cx);
+            }),
+        )
+        .child(
+            svg()
+                .path(icon_path)
+                .size(px(16.0))
+                .text_color(style.title_color),
+        )
+}
+
 /// Builds the custom titlebar element using precomputed title and style.
 pub fn render_titlebar(
     title: &str,
     style: &TitlebarStyle,
     default_bg: u32,
     is_left_panel_open: bool,
+    is_right_panel_open: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] is_menu_open: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] borderless: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] window: &Window,
@@ -243,7 +281,13 @@ pub fn render_titlebar(
             .child(title.to_string()),
     );
 
-    let panel_button = render_left_panel_button(is_left_panel_open, style, cx);
+    let panel_controls = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(4.0))
+        .child(render_left_panel_button(is_left_panel_open, style, cx))
+        .child(render_right_panel_button(is_right_panel_open, style, cx));
 
     let bar = div()
         .id("zenvi-titlebar")
@@ -272,7 +316,7 @@ pub fn render_titlebar(
             }),
         )
         .child(left_side)
-        .child(panel_button);
+        .child(panel_controls);
 
     #[cfg(not(target_os = "macos"))]
     let bar = {
@@ -290,7 +334,7 @@ pub fn render_titlebar(
             .child(
                 div()
                     .pr(if borderless { px(8.0) } else { px(0.0) })
-                    .child(panel_button),
+                    .child(panel_controls),
             )
             .children(window_controls);
 

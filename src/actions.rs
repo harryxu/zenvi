@@ -20,5 +20,6 @@ actions!(
         Undo,
         Redo,
         ToggleLeftPanel,
+        ToggleRightPanel,
     ]
 );

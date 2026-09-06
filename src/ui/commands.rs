@@ -276,4 +276,14 @@ impl ZenviView {
         end)()"#,
         );
     }
+
+    pub fn toggle_right_panel(&mut self, _cx: &mut Context<Self>) {
+        self.session.send_command(
+            r#"lua (function()
+            if _G.zenvi and _G.zenvi.toggle_right_panel then
+                _G.zenvi.toggle_right_panel()
+            end
+        end)()"#,
+        );
+    }
 }
