@@ -20,7 +20,7 @@
 - **CLI Integration** — Install `zenvi` command via menu (`Zenvi -> Install Shell Command`), then open files or directories from terminal (`zenvi .`, `zenvi file.rs`).
 - **Neovim Hot Reload** — Reload Neovim session via `Zenvi -> Reload Neovim` or `Cmd+Shift+R`. Supports [auto-session](https://github.com/rmagatti/auto-session) state save/restore.
 - **Collapsible Panels** — Dedicated titlebar toggle buttons for left, bottom, and right panels with dynamic icon states and bidirectional synchronization. Left panel defaults to [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim), bottom panel defaults to embedded terminal, and right panel supports custom functions.
-- **Delicate Statusline** — High-fidelity bottom statusline independently rendered via GPUI with custom font and size support (defaulting to 16px), fully synchronized with Neovim's statusline content and highlight colors while hiding the internal statusline in Neovim.
+- **Delicate Statusline** — Renders the statusline independently at the bottom of the window, with support for custom fonts and sizes.
 - **`guifont` Support** — Set font via `vim.opt.guifont` in `init.lua`. Injects `vim.g.zenvi = true` and `vim.g.gui_running = 1` on startup.
 
 ---
@@ -43,37 +43,25 @@ if vim.g.zenvi then
 end
 ```
 
-### Delicate Statusline (`delicate_statusline`)
+### Delicate Statusline
 
-Zenvi features an independent, native GPU statusbar component called **Delicate Statusline** rendered at the bottom of the window. It hides Neovim's internal terminal statusline (`laststatus = 0`) and renders an exact, real-time replica using GPUI with independent typography.
-
-#### Features
-- **Independent Font & Sizing**: Render statusline with any font family (e.g. *SF Pro Text*, *Inter*, or a preferred Nerd Font) and custom font size (default: `16px`), completely separate from your editor code font (`guifont`).
-- **Unified `guifont` Syntax**: Uses the standard Neovim `guifont` format (`"Font Family:h<size>"`).
-- **100% Theme & Content Parity**: Seamlessly extracts and evaluates active buffer info, Git branch, diagnostics, and plugins (like *lualine.nvim*, *heirline.nvim*, etc.) with accurate RGB foreground and background colors.
-- **Enabled by Default**: Automatically active out of the box with zero configuration needed.
+Zenvi can hide Neovim's built-in statusline (`laststatus = 0`) and render it as an independent component at the bottom of the window, allowing you to use a different font or font size for the statusline than the main editor.
 
 #### Configuration in `init.lua`
 
 ```lua
 if vim.g.zenvi then
-  -- Enable/disable delicate_statusline (default: true)
+  -- Enable/disable (default: true)
   vim.g.zenvi_delicate_statusline = true
 
-  -- Set custom font and size using standard guifont syntax
-  -- 1. Customize both font family and size:
+  -- Custom font and size using standard guifont syntax (default size: 16)
   vim.g.zenvi_delicate_statusline_font = "SF Pro Text:h16"
-
-  -- 2. Or customize only the font size (defaults to 16 if unspecified):
-  -- vim.g.zenvi_delicate_statusline_font = ":h18"
-
-  -- 3. Or customize only the font family (keeps default 16px size):
-  -- vim.g.zenvi_delicate_statusline_font = "JetBrainsMono Nerd Font"
+  -- Or font only: "JetBrainsMono Nerd Font"
+  -- Or size only: ":h14"
 end
 ```
 
-#### CLI Flag
-You can also launch Zenvi with `--no-delicate-statusline` to temporarily disable it and revert to standard in-grid rendering:
+Launch with `--no-delicate-statusline` to disable:
 ```bash
 zenvi --no-delicate-statusline
 ```
