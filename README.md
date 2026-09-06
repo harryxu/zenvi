@@ -6,6 +6,8 @@
 
   **A Neovim GUI frontend built with [GPUI](https://gpui.rs/).**
 
+![Preview](assets/preview.png)
+
 </div>
 
 ---
