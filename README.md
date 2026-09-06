@@ -24,7 +24,11 @@
 
 ## ⚙️ Configuration (in `init.lua`)
 
-Zenvi sets `vim.g.zenvi = true` and `vim.g.gui_running = 1` upon startup. You can configure your GUI font and line spacing directly in your Neovim configuration (`~/.config/nvim/init.lua`):
+Zenvi sets `vim.g.zenvi = true` and `vim.g.gui_running = 1` upon startup.
+
+### Font
+
+You can configure your GUI font and line spacing directly in your Neovim configuration (`~/.config/nvim/init.lua`):
 
 ```lua
 if vim.g.zenvi then
@@ -36,12 +40,7 @@ if vim.g.zenvi then
 end
 ```
 
-You can also change fonts dynamically at runtime inside Neovim:
-```vim
-:set guifont=Fira_Code:h16
-```
-
-### 🗂️ Left Panel Toggle (`toggle_left_panel`)
+### Left Panel Toggle (`toggle_left_panel`)
 
 Zenvi provides a left panel toggle button on the right side of the titlebar. The button dynamically switches icons (`panel-left` vs `panel-left-open`) based on whether the panel is currently open.
 
@@ -72,7 +71,7 @@ if vim.g.zenvi then
 end
 ```
 
-### 🗂️ Bottom Panel Toggle (`toggle_bottom_panel`)
+### Bottom Panel Toggle (`toggle_bottom_panel`)
 
 Zenvi provides a bottom panel toggle button located in the middle of the panel control group on the titlebar. The button dynamically switches icons (`panel-bottom` vs `panel-bottom-open`) based on whether the bottom panel is currently open.
 
@@ -104,7 +103,7 @@ if vim.g.zenvi then
 end
 ```
 
-### 🗂️ Right Panel Toggle (`toggle_right_panel`)
+### Right Panel Toggle (`toggle_right_panel`)
 
 Zenvi provides a right panel toggle button on the right side of the titlebar next to the left panel button. The button dynamically switches icons (`panel-right` vs `panel-right-open`) based on whether the panel is currently open.
 
