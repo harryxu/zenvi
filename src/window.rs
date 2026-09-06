@@ -68,12 +68,25 @@ pub fn get_safe_default_dir() -> Option<PathBuf> {
     None
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliLaunchConfig {
     pub cwd: Option<PathBuf>,
     pub targets: Vec<PathBuf>,
     /// Remove OS-provided window decorations (border + titlebar). Linux only.
     pub borderless: bool,
+    /// Whether the delicate_statusline is enabled. Defaults to true.
+    pub delicate_statusline: bool,
+}
+
+impl Default for CliLaunchConfig {
+    fn default() -> Self {
+        Self {
+            cwd: None,
+            targets: Vec::new(),
+            borderless: false,
+            delicate_statusline: true,
+        }
+    }
 }
 
 pub fn parse_cli_args<I, S>(args: I, current_dir: Option<PathBuf>) -> CliLaunchConfig
@@ -83,6 +96,7 @@ where
 {
     let mut targets = Vec::new();
     let mut borderless = false;
+    let mut delicate_statusline = true;
 
     for arg in args {
         let s = arg.as_ref();
@@ -92,6 +106,10 @@ where
         }
         if s == "--no-titlebar" || s == "-B" {
             borderless = true;
+            continue;
+        }
+        if s == "--no-delicate-statusline" {
+            delicate_statusline = false;
             continue;
         }
         let p = PathBuf::from(s);
@@ -123,7 +141,12 @@ where
         get_safe_default_dir()
     };
 
-    CliLaunchConfig { cwd, targets, borderless }
+    CliLaunchConfig {
+        cwd,
+        targets,
+        borderless,
+        delicate_statusline,
+    }
 }
 
 pub fn resolve_cli_launch_config() -> CliLaunchConfig {
@@ -165,7 +188,13 @@ pub fn url_to_path(url_str: &str) -> Option<PathBuf> {
     }
 }
 
-pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, borderless: bool, cx: &mut App) {
+pub fn open_zenvi_window(
+    cwd: Option<PathBuf>,
+    targets: Vec<PathBuf>,
+    borderless: bool,
+    delicate_statusline: bool,
+    cx: &mut App,
+) {
     let window_size = Size::new(px(1080.0), px(720.0));
     let window_count = cx.windows().len();
     let offset = px((window_count as f32 % 10.0) * 28.0);
@@ -220,7 +249,7 @@ pub fn open_zenvi_window(cwd: Option<PathBuf>, targets: Vec<PathBuf>, borderless
 
         let window_handle = window.window_handle();
         let view = cx.new(|cx| {
-            let view = ZenviView::with_cwd_and_targets(window_handle, cwd, targets, borderless, cx);
+            let view = ZenviView::with_cwd_and_targets(window_handle, cwd, targets, borderless, delicate_statusline, cx);
             window.focus(&view.focus_handle, cx);
             view
         });
@@ -264,11 +293,18 @@ mod tests {
         let cwd = PathBuf::from("/Users/test/workspace");
         let config1 = parse_cli_args(vec!["--no-titlebar", "main.rs"], Some(cwd.clone()));
         assert!(config1.borderless);
+        assert!(config1.delicate_statusline);
         assert_eq!(config1.targets.len(), 1);
 
         let config2 = parse_cli_args(vec!["-B", "src/lib.rs"], Some(cwd.clone()));
         assert!(config2.borderless);
+        assert!(config2.delicate_statusline);
         assert_eq!(config2.targets.len(), 1);
+
+        let config3 = parse_cli_args(vec!["--no-delicate-statusline", "file.txt"], Some(cwd.clone()));
+        assert!(!config3.borderless);
+        assert!(!config3.delicate_statusline);
+        assert_eq!(config3.targets.len(), 1);
     }
 
     #[test]

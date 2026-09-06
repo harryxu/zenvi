@@ -20,6 +20,7 @@
 - **CLI Integration** — Install `zenvi` command via menu (`Zenvi -> Install Shell Command`), then open files or directories from terminal (`zenvi .`, `zenvi file.rs`).
 - **Neovim Hot Reload** — Reload Neovim session via `Zenvi -> Reload Neovim` or `Cmd+Shift+R`. Supports [auto-session](https://github.com/rmagatti/auto-session) state save/restore.
 - **Collapsible Panels** — Dedicated titlebar toggle buttons for left, bottom, and right panels with dynamic icon states and bidirectional synchronization. Left panel defaults to [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim), bottom panel defaults to embedded terminal, and right panel supports custom functions.
+- **Delicate Statusline** — Renders the statusline independently at the bottom of the window, with support for custom fonts and sizes.
 - **`guifont` Support** — Set font via `vim.opt.guifont` in `init.lua`. Injects `vim.g.zenvi = true` and `vim.g.gui_running = 1` on startup.
 
 ---
@@ -40,6 +41,29 @@ if vim.g.zenvi then
   -- Optional: add extra pixel line spacing
   vim.opt.linespace = 2
 end
+```
+
+### Delicate Statusline
+
+Zenvi can hide Neovim's built-in statusline (`laststatus = 0`) and render it as an independent component at the bottom of the window, allowing you to use a different font or font size for the statusline than the main editor.
+
+#### Configuration in `init.lua`
+
+```lua
+if vim.g.zenvi then
+  -- Enable/disable (default: true)
+  vim.g.zenvi_delicate_statusline = true
+
+  -- Custom font and size using standard guifont syntax (default size: 16)
+  vim.g.zenvi_delicate_statusline_font = "SF Pro Text:h16"
+  -- Or font only: "JetBrainsMono Nerd Font"
+  -- Or size only: ":h14"
+end
+```
+
+Launch with `--no-delicate-statusline` to disable:
+```bash
+zenvi --no-delicate-statusline
 ```
 
 ### Left Panel Toggle (`toggle_left_panel`)
