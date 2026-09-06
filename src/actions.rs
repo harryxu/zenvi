@@ -19,5 +19,8 @@ actions!(
         SelectAll,
         Undo,
         Redo,
+        ToggleLeftPanel,
+        ToggleBottomPanel,
+        ToggleRightPanel,
     ]
 );

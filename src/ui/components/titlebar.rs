@@ -178,11 +178,51 @@ fn render_window_controls(
         .child(close_btn)
 }
 
+/// Renders a generic panel toggle button in the titlebar.
+fn render_panel_toggle_button(
+    id: &'static str,
+    is_open: bool,
+    closed_icon: &'static str,
+    open_icon: &'static str,
+    style: &TitlebarStyle,
+    on_toggle: impl Fn(&mut ZenviView, &mut Context<ZenviView>) + 'static,
+    cx: &mut Context<ZenviView>,
+) -> impl IntoElement {
+    let icon_path = if is_open { open_icon } else { closed_icon };
+
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .px(px(6.0))
+        .py(px(4.0))
+        .rounded_sm()
+        .cursor_pointer()
+        .hover(move |s| s.bg(style.menu_hover_bg))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, _window, cx| {
+                cx.stop_propagation();
+                on_toggle(this, cx);
+            }),
+        )
+        .child(
+            svg()
+                .path(icon_path)
+                .size(px(16.0))
+                .text_color(style.title_color),
+        )
+}
+
 /// Builds the custom titlebar element using precomputed title and style.
 pub fn render_titlebar(
     title: &str,
     style: &TitlebarStyle,
     default_bg: u32,
+    is_left_panel_open: bool,
+    is_bottom_panel_open: bool,
+    is_right_panel_open: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] is_menu_open: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] borderless: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] window: &Window,
@@ -204,6 +244,39 @@ pub fn render_titlebar(
             .text_color(style.title_color)
             .child(title.to_string()),
     );
+
+    let panel_controls = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(4.0))
+        .child(render_panel_toggle_button(
+            "panel-left-btn-toggle",
+            is_left_panel_open,
+            "icons/panel-left.svg",
+            "icons/panel-left-open.svg",
+            style,
+            |this, cx| this.toggle_left_panel(cx),
+            cx,
+        ))
+        .child(render_panel_toggle_button(
+            "panel-bottom-btn-toggle",
+            is_bottom_panel_open,
+            "icons/panel-bottom.svg",
+            "icons/panel-bottom-open.svg",
+            style,
+            |this, cx| this.toggle_bottom_panel(cx),
+            cx,
+        ))
+        .child(render_panel_toggle_button(
+            "panel-right-btn-toggle",
+            is_right_panel_open,
+            "icons/panel-right.svg",
+            "icons/panel-right-open.svg",
+            style,
+            |this, cx| this.toggle_right_panel(cx),
+            cx,
+        ));
 
     let bar = div()
         .id("zenvi-titlebar")
@@ -231,16 +304,28 @@ pub fn render_titlebar(
                 }
             }),
         )
-        .child(left_side);
+        .child(left_side)
+        .child(panel_controls);
 
     #[cfg(not(target_os = "macos"))]
     let bar = {
         let is_maximized = window.is_maximized();
-        let right_side = if borderless {
+        let window_controls = if borderless {
             Some(render_window_controls(default_bg, &style, window, cx))
         } else {
             None
         };
+
+        let right_side = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .child(
+                div()
+                    .pr(if borderless { px(8.0) } else { px(0.0) })
+                    .child(panel_controls),
+            )
+            .children(window_controls);
 
         let bar = bar
             .pl(px(8.0))
@@ -260,7 +345,7 @@ pub fn render_titlebar(
                 }),
             )
             .child(left_side)
-            .children(right_side);
+            .child(right_side);
 
         if borderless {
             bar.window_control_area(WindowControlArea::Drag)

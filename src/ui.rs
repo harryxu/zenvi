@@ -25,7 +25,7 @@ use crate::input::key_event_to_nvim;
 use crate::nvim::process::{NvimEvent, NvimSession};
 use crate::{
     About, CloseBuffer, Copy, Cut, Escape, InstallCli, OpenFile, OpenFolder, Paste, Redo, ReloadNvim,
-    SelectAll, Undo,
+    SelectAll, ToggleBottomPanel, ToggleLeftPanel, ToggleRightPanel, Undo,
 };
 use font::resolve_default_font_family;
 use gpui::prelude::*;
@@ -274,6 +274,15 @@ impl ZenviView {
         .on_action(cx.listener(|this, _: &Redo, _window, cx| {
             this.redo(cx);
         }))
+        .on_action(cx.listener(|this, _: &ToggleLeftPanel, _window, cx| {
+            this.toggle_left_panel(cx);
+        }))
+        .on_action(cx.listener(|this, _: &ToggleBottomPanel, _window, cx| {
+            this.toggle_bottom_panel(cx);
+        }))
+        .on_action(cx.listener(|this, _: &ToggleRightPanel, _window, cx| {
+            this.toggle_right_panel(cx);
+        }))
         .on_action(cx.listener(|this, _: &Escape, _window, _cx| {
             this.session.send_input("<Esc>");
         }))
@@ -450,6 +459,9 @@ impl Render for ZenviView {
             &display_title,
             &style,
             default_bg,
+            state.is_left_panel_open,
+            state.is_bottom_panel_open,
+            state.is_right_panel_open,
             self.is_menu_open,
             self.borderless,
             window,
