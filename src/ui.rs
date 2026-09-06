@@ -500,7 +500,8 @@ impl Render for ZenviView {
             .flex_col()
             .bg(rgb(default_bg))
             .track_focus(&self.focus_handle)
-            .key_context("zenvi");
+            .key_context("zenvi")
+            .overflow_hidden();
 
         let inner = Self::bind_actions(inner, cx);
 
@@ -545,7 +546,12 @@ impl Render for ZenviView {
             .child(titlebar_element)
             .child(
                 div()
-                    .flex_1()
+                    .when(delicate_statusline_enabled, |d| {
+                        d.h(px(rows as f32 * lh + GRID_PADDING_TOP)).flex_shrink_0()
+                    })
+                    .when(!delicate_statusline_enabled, |d| {
+                        d.flex_1()
+                    })
                     .w_full()
                     .pt(px(GRID_PADDING_TOP))
                     .pl(px(GRID_PADDING_LEFT))
@@ -558,11 +564,14 @@ impl Render for ZenviView {
             .when(delicate_statusline_enabled, |d| {
                 d.child(
                     div()
-                        .when(self.borderless && !is_maximized, |d| {
-                            d.rounded_b(px(10.0))
-                        })
+                        .h(statusline_height)
+                        .flex_shrink_0()
+                        .w_full()
                         .overflow_hidden()
                         .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, _window, cx| {
+                            cx.stop_propagation();
+                        }))
+                        .on_mouse_down(MouseButton::Right, cx.listener(|_this, _, _window, cx| {
                             cx.stop_propagation();
                         }))
                         .child(components::delicate_statusline::render_delicate_statusline(
