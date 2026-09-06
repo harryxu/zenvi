@@ -178,20 +178,20 @@ fn render_window_controls(
         .child(close_btn)
 }
 
-/// Renders the left panel toggle button on the right side of the titlebar.
-fn render_left_panel_button(
-    is_panel_open: bool,
+/// Renders a generic panel toggle button in the titlebar.
+fn render_panel_toggle_button(
+    id: &'static str,
+    is_open: bool,
+    closed_icon: &'static str,
+    open_icon: &'static str,
     style: &TitlebarStyle,
+    on_toggle: impl Fn(&mut ZenviView, &mut Context<ZenviView>) + 'static,
     cx: &mut Context<ZenviView>,
 ) -> impl IntoElement {
-    let icon_path = if is_panel_open {
-        "icons/panel-left-open.svg"
-    } else {
-        "icons/panel-left.svg"
-    };
+    let icon_path = if is_open { open_icon } else { closed_icon };
 
     div()
-        .id("panel-left-btn-toggle")
+        .id(id)
         .flex()
         .items_center()
         .justify_center()
@@ -202,46 +202,9 @@ fn render_left_panel_button(
         .hover(move |s| s.bg(style.menu_hover_bg))
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(|this, _, _window, cx| {
+            cx.listener(move |this, _, _window, cx| {
                 cx.stop_propagation();
-                this.toggle_left_panel(cx);
-            }),
-        )
-        .child(
-            svg()
-                .path(icon_path)
-                .size(px(16.0))
-                .text_color(style.title_color),
-        )
-}
-
-/// Renders the right panel toggle button on the right side of the titlebar.
-fn render_right_panel_button(
-    is_panel_open: bool,
-    style: &TitlebarStyle,
-    cx: &mut Context<ZenviView>,
-) -> impl IntoElement {
-    let icon_path = if is_panel_open {
-        "icons/panel-right-open.svg"
-    } else {
-        "icons/panel-right.svg"
-    };
-
-    div()
-        .id("panel-right-btn-toggle")
-        .flex()
-        .items_center()
-        .justify_center()
-        .px(px(6.0))
-        .py(px(4.0))
-        .rounded_sm()
-        .cursor_pointer()
-        .hover(move |s| s.bg(style.menu_hover_bg))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _, _window, cx| {
-                cx.stop_propagation();
-                this.toggle_right_panel(cx);
+                on_toggle(this, cx);
             }),
         )
         .child(
@@ -286,8 +249,24 @@ pub fn render_titlebar(
         .flex_row()
         .items_center()
         .gap(px(4.0))
-        .child(render_left_panel_button(is_left_panel_open, style, cx))
-        .child(render_right_panel_button(is_right_panel_open, style, cx));
+        .child(render_panel_toggle_button(
+            "panel-left-btn-toggle",
+            is_left_panel_open,
+            "icons/panel-left.svg",
+            "icons/panel-left-open.svg",
+            style,
+            |this, cx| this.toggle_left_panel(cx),
+            cx,
+        ))
+        .child(render_panel_toggle_button(
+            "panel-right-btn-toggle",
+            is_right_panel_open,
+            "icons/panel-right.svg",
+            "icons/panel-right-open.svg",
+            style,
+            |this, cx| this.toggle_right_panel(cx),
+            cx,
+        ));
 
     let bar = div()
         .id("zenvi-titlebar")
