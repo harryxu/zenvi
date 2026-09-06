@@ -100,7 +100,8 @@ pub fn init_menus(cx: &mut App) {
 pub fn file_menu_items() -> Vec<MenuItem> {
     vec![
         MenuItem::action("New Window", "Ctrl+Shift+N", |this, _window, cx| {
-            crate::window::open_zenvi_window(this.cwd.clone(), Vec::new(), this.borderless, cx);
+            let delicate_statusline = this.session.state.read().delicate_statusline_enabled;
+            crate::window::open_zenvi_window(this.cwd.clone(), Vec::new(), this.borderless, delicate_statusline, cx);
         }),
         MenuItem::separator(),
         MenuItem::action("Open File...", "Ctrl+Shift+O", |this, _window, cx| {
@@ -150,7 +151,8 @@ pub fn build_main_menu() -> Vec<MenuItem> {
         MenuItem::separator(),
         MenuItem::action("Open Neovim Config", "Ctrl+Shift+,", |this, _window, cx| {
             let (config_dir, target_file) = crate::window::get_nvim_config_file();
-            crate::window::open_zenvi_window(Some(config_dir), vec![target_file], this.borderless, cx);
+            let delicate_statusline = this.session.state.read().delicate_statusline_enabled;
+            crate::window::open_zenvi_window(Some(config_dir), vec![target_file], this.borderless, delicate_statusline, cx);
         }),
         MenuItem::action("Reload Neovim", "Ctrl+Shift+R", |this, _window, cx| {
             this.reload_nvim(cx);
