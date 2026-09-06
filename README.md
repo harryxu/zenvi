@@ -25,6 +25,54 @@
 
 ---
 
+## 📦 Installation
+
+### Pre-built Binaries (macOS)
+
+Download the latest `.dmg` from [GitHub Releases](https://github.com/harryxu/zenvi/releases):
+
+#### ⚠️ macOS Gatekeeper Warning
+
+Because Zenvi is an open-source project and is not signed with an Apple Developer ID, macOS Gatekeeper will block launch and display:
+> *"Apple cannot verify that 'Zenvi.app' is free of malware that may harm your Mac or compromise your privacy."*
+
+To permit Zenvi to run, remove the quarantine attribute via Terminal:
+
+```bash
+xattr -cr /Applications/Zenvi.app
+```
+
+Alternatively, open **System Settings -> Privacy & Security -> Security**, scroll down to find the message stating *“Zenvi was blocked...”*, and click **Open Anyway**.
+
+---
+
+## 🛠️ Building from Source
+
+If you prefer to compile Zenvi locally:
+
+### Prerequisites
+
+- **Rust**: `1.98.0+` ([rustup.rs](https://rustup.rs/))
+- **Neovim**: `0.9.0+` 
+
+### Build
+
+```bash
+git clone https://github.com/harryxu/zenvi.git
+cd zenvi
+cargo build --release
+```
+
+### Packaging macOS `.app` 
+
+```bash
+# Build Zenvi.app bundle in target/Zenvi.app
+make macapp
+```
+
+
+---
+
 ## ⚙️ Configuration (in `init.lua`)
 
 Zenvi sets `vim.g.zenvi = true` and `vim.g.gui_running = 1` upon startup.
