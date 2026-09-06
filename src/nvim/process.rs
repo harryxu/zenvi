@@ -1,6 +1,6 @@
 use crate::nvim::events::handle_redraw_event;
 use crate::nvim::protocol::RpcMessage;
-use crate::nvim::state::NvimState;
+use crate::nvim::state::{NvimState, StatuslineData, StatuslineSpan};
 use anyhow::{anyhow, Result};
 use parking_lot::RwLock;
 use rmpv::Value;
@@ -78,6 +78,215 @@ fn find_nvim_binary() -> PathBuf {
     }
 
     PathBuf::from("nvim")
+}
+
+// =========================================================================
+// RPC Notification & Response Handlers
+// =========================================================================
+
+fn parse_statusline_span(m: &[(Value, Value)]) -> StatuslineSpan {
+    let mut span = StatuslineSpan::default();
+    for (sk, sv) in m {
+        match sk.as_str() {
+            Some("text") => {
+                if let Some(t) = sv.as_str() {
+                    span.text = t.to_string();
+                }
+            }
+            Some("fg") => {
+                span.fg = sv.as_u64().map(|c| c as u32);
+            }
+            Some("bg") => {
+                span.bg = sv.as_u64().map(|c| c as u32);
+            }
+            Some("bold") => {
+                span.bold = sv.as_bool().unwrap_or(false);
+            }
+            Some("italic") => {
+                span.italic = sv.as_bool().unwrap_or(false);
+            }
+            Some("underline") => {
+                span.underline = sv.as_bool().unwrap_or(false);
+            }
+            _ => {}
+        }
+    }
+    span
+}
+
+fn parse_statusline_spans(arr: &[Value]) -> Vec<StatuslineSpan> {
+    arr.iter()
+        .filter_map(|v| v.as_map())
+        .map(|m| parse_statusline_span(m))
+        .collect()
+}
+
+fn parse_statusline_update(data_map: &[(Value, Value)]) -> StatuslineData {
+    let mut raw_str = String::new();
+    let mut bg = None;
+    let mut spans = Vec::new();
+    let mut left_spans = Vec::new();
+    let mut center_spans = Vec::new();
+    let mut right_spans = Vec::new();
+
+    for (k, v) in data_map {
+        match k.as_str() {
+            Some("raw_str") => {
+                if let Some(s) = v.as_str() {
+                    raw_str = s.to_string();
+                }
+            }
+            Some("bg") => {
+                bg = v.as_u64().map(|c| c as u32);
+            }
+            Some("spans") => {
+                if let Some(arr) = v.as_array() {
+                    spans = parse_statusline_spans(arr);
+                }
+            }
+            Some("left_spans") => {
+                if let Some(arr) = v.as_array() {
+                    left_spans = parse_statusline_spans(arr);
+                }
+            }
+            Some("center_spans") => {
+                if let Some(arr) = v.as_array() {
+                    center_spans = parse_statusline_spans(arr);
+                }
+            }
+            Some("right_spans") => {
+                if let Some(arr) = v.as_array() {
+                    right_spans = parse_statusline_spans(arr);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if left_spans.is_empty() && right_spans.is_empty() && !spans.is_empty() {
+        left_spans = spans.clone();
+    }
+
+    StatuslineData {
+        raw_str,
+        bg,
+        spans,
+        left_spans,
+        center_spans,
+        right_spans,
+    }
+}
+
+fn handle_statusline_config(cfg: &[(Value, Value)], s: &mut NvimState) -> bool {
+    let mut changed = false;
+    for (k, v) in cfg {
+        match k.as_str() {
+            Some("enabled") => {
+                if let Some(enabled) = v.as_bool() {
+                    if s.delicate_statusline_enabled != enabled {
+                        s.delicate_statusline_enabled = enabled;
+                        changed = true;
+                    }
+                }
+            }
+            Some("font") => {
+                if let Some(font_str) = v.as_str() {
+                    if s.delicate_statusline_font != font_str {
+                        s.delicate_statusline_font = font_str.to_string();
+                        changed = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+fn handle_notification(
+    method: &str,
+    params: Vec<Value>,
+    state: &RwLock<NvimState>,
+    event_tx: &mpsc::UnboundedSender<NvimEvent>,
+) {
+    match method {
+        "redraw" => {
+            let mut s = state.write();
+            for event in params {
+                if let Some(event_arr) = event.as_array() {
+                    if handle_redraw_event(&mut s, event_arr) {
+                        let _ = event_tx.send(NvimEvent::Redraw);
+                    }
+                }
+            }
+        }
+        "zenvi_prewarm_start" => {
+            state.write().is_prewarming = true;
+        }
+        "zenvi_prewarm_end" => {
+            state.write().is_prewarming = false;
+            let _ = event_tx.send(NvimEvent::Redraw);
+        }
+        "zenvi_left_panel_state" | "zenvi_panel_state" => {
+            if let Some(open) = params.first().and_then(|v| v.as_bool()) {
+                let mut s = state.write();
+                if s.is_left_panel_open != open {
+                    s.is_left_panel_open = open;
+                    let _ = event_tx.send(NvimEvent::Redraw);
+                }
+            }
+        }
+        "zenvi_statusline_config" => {
+            if let Some(cfg) = params.first().and_then(|v| v.as_map()) {
+                let mut s = state.write();
+                if handle_statusline_config(cfg, &mut s) {
+                    let _ = event_tx.send(NvimEvent::Redraw);
+                }
+            }
+        }
+        "zenvi_statusline_update" => {
+            if let Some(data_map) = params.first().and_then(|v| v.as_map()) {
+                let statusline_data = parse_statusline_update(data_map);
+                state.write().statusline_data = statusline_data;
+                let _ = event_tx.send(NvimEvent::Redraw);
+            }
+        }
+        "zenvi_bottom_panel_state" => {
+            if let Some(open) = params.first().and_then(|v| v.as_bool()) {
+                let mut s = state.write();
+                if s.is_bottom_panel_open != open {
+                    s.is_bottom_panel_open = open;
+                    let _ = event_tx.send(NvimEvent::Redraw);
+                }
+            }
+        }
+        "zenvi_right_panel_state" => {
+            if let Some(open) = params.first().and_then(|v| v.as_bool()) {
+                let mut s = state.write();
+                if s.is_right_panel_open != open {
+                    s.is_right_panel_open = open;
+                    let _ = event_tx.send(NvimEvent::Redraw);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_response(
+    msgid: u32,
+    error: Value,
+    result: Value,
+    pending_requests: &PendingRequests,
+) {
+    let mut map = pending_requests.lock();
+    if let Some(tx) = map.remove(&msgid) {
+        if error.is_nil() {
+            let _ = tx.send(Ok(result));
+        } else {
+            let _ = tx.send(Err(error));
+        }
+    }
 }
 
 impl NvimSession {
@@ -215,193 +424,24 @@ impl NvimSession {
                             if let Some(msg) = RpcMessage::parse(val) {
                                 match msg {
                                     RpcMessage::Notification { method, params } => {
-                                        match method.as_str() {
-                                            "redraw" => {
-                                                let mut s = state_clone.write();
-                                                for event in params {
-                                                    if let Some(event_arr) = event.as_array() {
-                                                        if handle_redraw_event(&mut s, event_arr) {
-                                                            let _ = event_tx_clone.send(NvimEvent::Redraw);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            "zenvi_prewarm_start" => {
-                                                state_clone.write().is_prewarming = true;
-                                            }
-                                            "zenvi_prewarm_end" => {
-                                                state_clone.write().is_prewarming = false;
-                                                let _ = event_tx_clone.send(NvimEvent::Redraw);
-                                            }
-                                            "zenvi_left_panel_state" | "zenvi_panel_state" => {
-                                                if let Some(open) = params.first().and_then(|v| v.as_bool()) {
-                                                    let mut s = state_clone.write();
-                                                    if s.is_left_panel_open != open {
-                                                        s.is_left_panel_open = open;
-                                                        let _ = event_tx_clone.send(NvimEvent::Redraw);
-                                                    }
-                                                }
-                                            }
-
-                                             "zenvi_statusline_config" => {
-                                                 if let Some(cfg) = params.first().and_then(|v| v.as_map()) {
-                                                     let mut s = state_clone.write();
-                                                     let mut changed = false;
-                                                     for (k, v) in cfg {
-                                                         match k.as_str() {
-                                                             Some("enabled") => {
-                                                                 if let Some(enabled) = v.as_bool() {
-                                                                     if s.delicate_statusline_enabled != enabled {
-                                                                         s.delicate_statusline_enabled = enabled;
-                                                                         changed = true;
-                                                                     }
-                                                                 }
-                                                             }
-                                                             Some("font") => {
-                                                                 if let Some(font_str) = v.as_str() {
-                                                                     if s.delicate_statusline_font != font_str {
-                                                                         s.delicate_statusline_font = font_str.to_string();
-                                                                         changed = true;
-                                                                     }
-                                                                 }
-                                                             }
-                                                             _ => {}
-                                                         }
-                                                     }
-                                                     if changed {
-                                                         let _ = event_tx_clone.send(NvimEvent::Redraw);
-                                                     }
-                                                 }
-                                             }
-                                             "zenvi_statusline_update" => {
-                                                 if let Some(data_map) = params.first().and_then(|v| v.as_map()) {
-                                                     let mut raw_str = String::new();
-                                                     let mut bg = None;
-                                                     let mut spans = Vec::new();
-                                                     let mut left_spans = Vec::new();
-                                                     let mut center_spans = Vec::new();
-                                                     let mut right_spans = Vec::new();
-
-                                                     let parse_span_list = |arr: &[Value]| -> Vec<crate::nvim::state::StatuslineSpan> {
-                                                         let mut list = Vec::new();
-                                                         for span_val in arr {
-                                                             if let Some(m) = span_val.as_map() {
-                                                                 let mut span = crate::nvim::state::StatuslineSpan::default();
-                                                                 for (sk, sv) in m {
-                                                                     match sk.as_str() {
-                                                                         Some("text") => {
-                                                                             if let Some(t) = sv.as_str() {
-                                                                                 span.text = t.to_string();
-                                                                             }
-                                                                         }
-                                                                         Some("fg") => {
-                                                                             span.fg = sv.as_u64().map(|c| c as u32);
-                                                                         }
-                                                                         Some("bg") => {
-                                                                             span.bg = sv.as_u64().map(|c| c as u32);
-                                                                         }
-                                                                         Some("bold") => {
-                                                                             span.bold = sv.as_bool().unwrap_or(false);
-                                                                         }
-                                                                         Some("italic") => {
-                                                                             span.italic = sv.as_bool().unwrap_or(false);
-                                                                         }
-                                                                         Some("underline") => {
-                                                                             span.underline = sv.as_bool().unwrap_or(false);
-                                                                         }
-                                                                         _ => {}
-                                                                     }
-                                                                 }
-                                                                 list.push(span);
-                                                             }
-                                                         }
-                                                         list
-                                                     };
-
-                                                     for (k, v) in data_map {
-                                                         match k.as_str() {
-                                                             Some("raw_str") => {
-                                                                 if let Some(s) = v.as_str() {
-                                                                     raw_str = s.to_string();
-                                                                 }
-                                                             }
-                                                             Some("bg") => {
-                                                                 bg = v.as_u64().map(|c| c as u32);
-                                                             }
-                                                             Some("spans") => {
-                                                                 if let Some(arr) = v.as_array() {
-                                                                     spans = parse_span_list(arr);
-                                                                 }
-                                                             }
-                                                             Some("left_spans") => {
-                                                                 if let Some(arr) = v.as_array() {
-                                                                     left_spans = parse_span_list(arr);
-                                                                 }
-                                                             }
-                                                             Some("center_spans") => {
-                                                                 if let Some(arr) = v.as_array() {
-                                                                     center_spans = parse_span_list(arr);
-                                                                 }
-                                                             }
-                                                             Some("right_spans") => {
-                                                                 if let Some(arr) = v.as_array() {
-                                                                     right_spans = parse_span_list(arr);
-                                                                 }
-                                                             }
-                                                             _ => {}
-                                                         }
-                                                     }
-
-                                                     if left_spans.is_empty() && right_spans.is_empty() && !spans.is_empty() {
-                                                         left_spans = spans.clone();
-                                                     }
-
-                                                     let mut s = state_clone.write();
-                                                     s.statusline_data = crate::nvim::state::StatuslineData {
-                                                         raw_str,
-                                                         bg,
-                                                         spans,
-                                                         left_spans,
-                                                         center_spans,
-                                                         right_spans,
-                                                     };
-                                                     let _ = event_tx_clone.send(NvimEvent::Redraw);
-                                                 }
-                                             }
-                                            "zenvi_bottom_panel_state" => {
-                                                if let Some(open) = params.first().and_then(|v| v.as_bool()) {
-                                                    let mut s = state_clone.write();
-                                                    if s.is_bottom_panel_open != open {
-                                                        s.is_bottom_panel_open = open;
-                                                        let _ = event_tx_clone.send(NvimEvent::Redraw);
-                                                    }
-                                                }
-                                            }
-                                            "zenvi_right_panel_state" => {
-                                                if let Some(open) = params.first().and_then(|v| v.as_bool()) {
-                                                    let mut s = state_clone.write();
-                                                    if s.is_right_panel_open != open {
-                                                        s.is_right_panel_open = open;
-                                                        let _ = event_tx_clone.send(NvimEvent::Redraw);
-                                                    }
-                                                }
-                                            }
-                                            _ => {}
-                                        }
+                                        handle_notification(
+                                            &method,
+                                            params,
+                                            &state_clone,
+                                            &event_tx_clone,
+                                        );
                                     }
                                     RpcMessage::Response {
                                         msgid,
                                         error,
                                         result,
                                     } => {
-                                        let mut map = pending_requests_clone.lock();
-                                        if let Some(tx) = map.remove(&msgid) {
-                                            if error.is_nil() {
-                                                let _ = tx.send(Ok(result));
-                                            } else {
-                                                let _ = tx.send(Err(error));
-                                            }
-                                        }
+                                        handle_response(
+                                            msgid,
+                                            error,
+                                            result,
+                                            &pending_requests_clone,
+                                        );
                                     }
                                     RpcMessage::Request { .. } => {}
                                 }
@@ -972,5 +1012,63 @@ mod tests {
 
             session.kill();
         });
+    }
+
+    #[test]
+    fn test_parse_statusline_helpers() {
+        let span_map = vec![
+            (Value::from("text"), Value::from("hello.rs")),
+            (Value::from("fg"), Value::from(0xFFFFFFu64)),
+            (Value::from("bg"), Value::from(0x1E1E1Eu64)),
+            (Value::from("bold"), Value::from(true)),
+            (Value::from("italic"), Value::from(false)),
+            (Value::from("underline"), Value::from(true)),
+        ];
+
+        let span = parse_statusline_span(&span_map);
+        assert_eq!(span.text, "hello.rs");
+        assert_eq!(span.fg, Some(0xFFFFFF));
+        assert_eq!(span.bg, Some(0x1E1E1E));
+        assert!(span.bold);
+        assert!(!span.italic);
+        assert!(span.underline);
+
+        let update_map = vec![
+            (Value::from("raw_str"), Value::from("NORMAL hello.rs [utf-8]")),
+            (Value::from("bg"), Value::from(0x282C34u64)),
+            (
+                Value::from("left_spans"),
+                Value::from(vec![Value::Map(span_map.clone())]),
+            ),
+            (
+                Value::from("right_spans"),
+                Value::from(vec![Value::Map(span_map)]),
+            ),
+        ];
+
+        let data = parse_statusline_update(&update_map);
+        assert_eq!(data.raw_str, "NORMAL hello.rs [utf-8]");
+        assert_eq!(data.bg, Some(0x282C34));
+        assert_eq!(data.left_spans.len(), 1);
+        assert_eq!(data.right_spans.len(), 1);
+        assert_eq!(data.left_spans[0].text, "hello.rs");
+    }
+
+    #[test]
+    fn test_handle_statusline_config() {
+        let mut state = NvimState::default();
+        let cfg = vec![
+            (Value::from("enabled"), Value::from(false)),
+            (Value::from("font"), Value::from("JetBrains Mono:h14")),
+        ];
+
+        let changed = handle_statusline_config(&cfg, &mut state);
+        assert!(changed);
+        assert!(!state.delicate_statusline_enabled);
+        assert_eq!(state.delicate_statusline_font, "JetBrains Mono:h14");
+
+        // Calling again with same values shouldn't report changed
+        let changed2 = handle_statusline_config(&cfg, &mut state);
+        assert!(!changed2);
     }
 }
