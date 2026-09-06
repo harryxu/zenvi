@@ -17,6 +17,7 @@ pub fn render_delicate_statusline(
     font_size: Pixels,
     height: Pixels,
 ) -> impl IntoElement {
+    let bar_bg = data.bg.unwrap_or(default_bg);
     let mut root = div()
         .id("delicate-statusline")
         .h(height)
@@ -24,7 +25,8 @@ pub fn render_delicate_statusline(
         .flex()
         .flex_row()
         .items_center()
-        .bg(rgb(default_bg))
+        .justify_between()
+        .bg(rgb(bar_bg))
         .overflow_hidden()
         .text_size(font_size);
 
@@ -32,48 +34,74 @@ pub fn render_delicate_statusline(
         root = root.font_family(font_family.to_string());
     }
 
-    if data.spans.is_empty() {
-        if !data.raw_str.is_empty() {
-            root = root.child(
-                div()
-                    .px(px(8.0))
-                    .text_color(rgb(default_fg))
-                    .child(data.raw_str.clone()),
-            );
-        }
-        return root;
-    }
-
-    for (i, span) in data.spans.iter().enumerate() {
-        if span.text.is_empty() {
-            continue;
-        }
-
-        let fg = span.fg.unwrap_or(default_fg);
-        let mut span_el = div()
-            .id(ElementId::NamedInteger("delicate-span".into(), i as u64))
-            .text_color(rgb(fg))
-            .flex_shrink_0()
-            .h_full()
+    let render_group = |spans: &[crate::nvim::state::StatuslineSpan], prefix: &'static str| {
+        let mut group = div()
             .flex()
-            .items_center();
+            .flex_row()
+            .items_center()
+            .h_full()
+            .flex_shrink_0();
 
-        if let Some(bg) = span.bg {
-            span_el = span_el.bg(rgb(bg));
+        for (i, span) in spans.iter().enumerate() {
+            if span.text.is_empty() {
+                continue;
+            }
+
+            let fg = span.fg.unwrap_or(default_fg);
+            let mut span_el = div()
+                .id(ElementId::NamedInteger(prefix.into(), i as u64))
+                .text_color(rgb(fg))
+                .flex_shrink_0()
+                .h_full()
+                .flex()
+                .items_center();
+
+            if let Some(bg) = span.bg {
+                span_el = span_el.bg(rgb(bg));
+            }
+
+            if span.bold {
+                span_el = span_el.font_weight(FontWeight::BOLD);
+            }
+            if span.italic {
+                span_el = span_el.italic();
+            }
+            if span.underline {
+                span_el = span_el.underline();
+            }
+
+            span_el = span_el.child(span.text.clone());
+            group = group.child(span_el);
         }
 
-        if span.bold {
-            span_el = span_el.font_weight(FontWeight::BOLD);
-        }
-        if span.italic {
-            span_el = span_el.italic();
-        }
-        if span.underline {
-            span_el = span_el.underline();
+        group
+    };
+
+    let has_multipart = !data.left_spans.is_empty()
+        || !data.center_spans.is_empty()
+        || !data.right_spans.is_empty();
+
+    if has_multipart {
+        let left = render_group(&data.left_spans, "delicate-left");
+        root = root.child(left);
+
+        if !data.center_spans.is_empty() {
+            let center = render_group(&data.center_spans, "delicate-center");
+            root = root.child(center);
         }
 
-        span_el = span_el.child(span.text.clone());
-        root = root.child(span_el);
+        let right = render_group(&data.right_spans, "delicate-right");
+        root = root.child(right);
+    } else if !data.spans.is_empty() {
+        let all = render_group(&data.spans, "delicate-span");
+        root = root.child(all);
+    } else if !data.raw_str.is_empty() {
+        root = root.child(
+            div()
+                .px(px(8.0))
+                .text_color(rgb(default_fg))
+                .child(data.raw_str.clone()),
+        );
     }
 
     root

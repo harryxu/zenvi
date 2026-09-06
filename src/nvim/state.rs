@@ -480,7 +480,11 @@ pub struct StatuslineSpan {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StatuslineData {
     pub raw_str: String,
+    pub bg: Option<u32>,
     pub spans: Vec<StatuslineSpan>,
+    pub left_spans: Vec<StatuslineSpan>,
+    pub center_spans: Vec<StatuslineSpan>,
+    pub right_spans: Vec<StatuslineSpan>,
 }
 
 #[derive(Debug)]

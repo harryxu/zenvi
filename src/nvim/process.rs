@@ -276,7 +276,47 @@ impl NvimSession {
                                              "zenvi_statusline_update" => {
                                                  if let Some(data_map) = params.first().and_then(|v| v.as_map()) {
                                                      let mut raw_str = String::new();
+                                                     let mut bg = None;
                                                      let mut spans = Vec::new();
+                                                     let mut left_spans = Vec::new();
+                                                     let mut center_spans = Vec::new();
+                                                     let mut right_spans = Vec::new();
+
+                                                     let parse_span_list = |arr: &[Value]| -> Vec<crate::nvim::state::StatuslineSpan> {
+                                                         let mut list = Vec::new();
+                                                         for span_val in arr {
+                                                             if let Some(m) = span_val.as_map() {
+                                                                 let mut span = crate::nvim::state::StatuslineSpan::default();
+                                                                 for (sk, sv) in m {
+                                                                     match sk.as_str() {
+                                                                         Some("text") => {
+                                                                             if let Some(t) = sv.as_str() {
+                                                                                 span.text = t.to_string();
+                                                                             }
+                                                                         }
+                                                                         Some("fg") => {
+                                                                             span.fg = sv.as_u64().map(|c| c as u32);
+                                                                         }
+                                                                         Some("bg") => {
+                                                                             span.bg = sv.as_u64().map(|c| c as u32);
+                                                                         }
+                                                                         Some("bold") => {
+                                                                             span.bold = sv.as_bool().unwrap_or(false);
+                                                                         }
+                                                                         Some("italic") => {
+                                                                             span.italic = sv.as_bool().unwrap_or(false);
+                                                                         }
+                                                                         Some("underline") => {
+                                                                             span.underline = sv.as_bool().unwrap_or(false);
+                                                                         }
+                                                                         _ => {}
+                                                                     }
+                                                                 }
+                                                                 list.push(span);
+                                                             }
+                                                         }
+                                                         list
+                                                     };
 
                                                      for (k, v) in data_map {
                                                          match k.as_str() {
@@ -285,47 +325,46 @@ impl NvimSession {
                                                                      raw_str = s.to_string();
                                                                  }
                                                              }
+                                                             Some("bg") => {
+                                                                 bg = v.as_u64().map(|c| c as u32);
+                                                             }
                                                              Some("spans") => {
                                                                  if let Some(arr) = v.as_array() {
-                                                                     for span_val in arr {
-                                                                         if let Some(m) = span_val.as_map() {
-                                                                             let mut span = crate::nvim::state::StatuslineSpan::default();
-                                                                             for (sk, sv) in m {
-                                                                                 match sk.as_str() {
-                                                                                     Some("text") => {
-                                                                                         if let Some(t) = sv.as_str() {
-                                                                                             span.text = t.to_string();
-                                                                                         }
-                                                                                     }
-                                                                                     Some("fg") => {
-                                                                                         span.fg = sv.as_u64().map(|c| c as u32);
-                                                                                     }
-                                                                                     Some("bg") => {
-                                                                                         span.bg = sv.as_u64().map(|c| c as u32);
-                                                                                     }
-                                                                                     Some("bold") => {
-                                                                                         span.bold = sv.as_bool().unwrap_or(false);
-                                                                                     }
-                                                                                     Some("italic") => {
-                                                                                         span.italic = sv.as_bool().unwrap_or(false);
-                                                                                     }
-                                                                                     Some("underline") => {
-                                                                                         span.underline = sv.as_bool().unwrap_or(false);
-                                                                                     }
-                                                                                     _ => {}
-                                                                                 }
-                                                                             }
-                                                                             spans.push(span);
-                                                                         }
-                                                                     }
+                                                                     spans = parse_span_list(arr);
+                                                                 }
+                                                             }
+                                                             Some("left_spans") => {
+                                                                 if let Some(arr) = v.as_array() {
+                                                                     left_spans = parse_span_list(arr);
+                                                                 }
+                                                             }
+                                                             Some("center_spans") => {
+                                                                 if let Some(arr) = v.as_array() {
+                                                                     center_spans = parse_span_list(arr);
+                                                                 }
+                                                             }
+                                                             Some("right_spans") => {
+                                                                 if let Some(arr) = v.as_array() {
+                                                                     right_spans = parse_span_list(arr);
                                                                  }
                                                              }
                                                              _ => {}
                                                          }
                                                      }
 
+                                                     if left_spans.is_empty() && right_spans.is_empty() && !spans.is_empty() {
+                                                         left_spans = spans.clone();
+                                                     }
+
                                                      let mut s = state_clone.write();
-                                                     s.statusline_data = crate::nvim::state::StatuslineData { raw_str, spans };
+                                                     s.statusline_data = crate::nvim::state::StatuslineData {
+                                                         raw_str,
+                                                         bg,
+                                                         spans,
+                                                         left_spans,
+                                                         center_spans,
+                                                         right_spans,
+                                                     };
                                                      let _ = event_tx_clone.send(NvimEvent::Redraw);
                                                  }
                                              }
