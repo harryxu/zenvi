@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  release:
+    types: [published, prereleased]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-dmg:
+    name: Build & Upload macOS DMGs
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build ARM & Intel DMGs
+        run: make dmg-all
+
+      - name: Upload DMGs to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        with:
+          files: |
+            target/Zenvi-*.dmg
+            target/Zenvi-*.dmg.sha256
