@@ -17,7 +17,7 @@
 - **Theme Synchronization** — Titlebar, borders, and menus dynamically derive colors from Neovim's active colorscheme.
 - **CLI Integration** — Install `zenvi` command via menu (`Zenvi -> Install Shell Command`), then open files or directories from terminal (`zenvi .`, `zenvi file.rs`).
 - **Neovim Hot Reload** — Reload Neovim session via `Zenvi -> Reload Neovim` or `Cmd+Shift+R`. Supports [auto-session](https://github.com/rmagatti/auto-session) state save/restore.
-- **Collapsible Panels** — Dedicated titlebar toggle buttons for left and right panels with dynamic icon states and bidirectional synchronization. Left panel defaults to [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim) or custom functions, while right panel supports custom functions.
+- **Collapsible Panels** — Dedicated titlebar toggle buttons for left, bottom, and right panels with dynamic icon states and bidirectional synchronization. Left panel defaults to [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim), bottom panel defaults to embedded terminal, and right panel supports custom functions.
 - **`guifont` Support** — Set font via `vim.opt.guifont` in `init.lua`. Injects `vim.g.zenvi = true` and `vim.g.gui_running = 1` on startup.
 
 ---
@@ -68,6 +68,38 @@ if vim.g.zenvi then
   -- Optional: Define custom state detection (returns boolean)
   vim.g.zenvi_is_left_panel_open = function()
     return require("nvim-tree.api").tree.is_visible()
+  end
+end
+```
+
+### 🗂️ Bottom Panel Toggle (`toggle_bottom_panel`)
+
+Zenvi provides a bottom panel toggle button located in the middle of the panel control group on the titlebar. The button dynamically switches icons (`panel-bottom` vs `panel-bottom-open`) based on whether the bottom panel is currently open.
+
+#### Default Behavior
+The default behavior is toggling an embedded **Neovim terminal** (using native `:botright 12split | terminal` or [toggleterm.nvim](https://github.com/akinsho/toggleterm.nvim) if installed). Toggling it open starts or displays the terminal, and toggling it again closes the window while preserving active shell jobs.
+
+#### Built-in API & Commands
+- **Lua function**: `zenvi.toggle_bottom_panel()`
+- **Ex command**: `:ZenviToggleBottomPanel`
+- **State query**: `zenvi.is_bottom_panel_open()`
+
+#### Custom Panel Function
+You can customize the toggle function in your `init.lua`:
+
+```lua
+if vim.g.zenvi then
+  -- Define custom toggle logic (Lua function or Ex command string)
+  vim.g.zenvi_toggle_bottom_panel = function()
+    -- Example: toggle trouble.nvim or custom terminal
+    require("trouble").toggle()
+  end
+  -- Or as an Ex command string:
+  -- vim.g.zenvi_toggle_bottom_panel = "Trouble toggle"
+
+  -- Optional: Define custom state detection (returns boolean)
+  vim.g.zenvi_is_bottom_panel_open = function()
+    return require("trouble").is_open()
   end
 end
 ```

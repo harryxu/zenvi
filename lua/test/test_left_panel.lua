@@ -4,6 +4,8 @@ assert(type(_G.zenvi.toggle_left_panel) == "function", "toggle_left_panel must b
 assert(type(_G.zenvi.is_left_panel_open) == "function", "is_left_panel_open must be a function")
 assert(type(_G.zenvi.toggle_right_panel) == "function", "toggle_right_panel must be a function")
 assert(type(_G.zenvi.is_right_panel_open) == "function", "is_right_panel_open must be a function")
+assert(type(_G.zenvi.toggle_bottom_panel) == "function", "toggle_bottom_panel must be a function")
+assert(type(_G.zenvi.is_bottom_panel_open) == "function", "is_bottom_panel_open must be a function")
 
 -- Intercept vim.notify to test warning messages
 local notifications = {}
@@ -13,6 +15,7 @@ end
 
 -- 1. In default clean nvim, panels should not be open
 assert(_G.zenvi.is_left_panel_open() == false, "default left panel should be closed")
+assert(_G.zenvi.is_bottom_panel_open() == false, "default bottom panel should be closed")
 assert(_G.zenvi.is_right_panel_open() == false, "default right panel should be closed")
 
 -- 2. Toggle left panel in clean environment without neo-tree should trigger warning notification
@@ -75,4 +78,31 @@ assert(_G.zenvi.is_right_panel_open() == true, "custom right is_open function mu
 vim.g.zenvi_is_right_panel_open = nil
 assert(_G.zenvi.is_right_panel_open() == false, "right panel should be closed after resetting check function")
 
-print("All left & right panel Lua tests passed!")
+-- 9. Bottom panel toggle (default behavior: open terminal)
+local b_ok, b_err = pcall(_G.zenvi.toggle_bottom_panel)
+assert(b_ok, "toggle_bottom_panel default (terminal) must not error: " .. tostring(b_err))
+assert(_G.zenvi.is_bottom_panel_open() == true, "bottom panel terminal should be open after first toggle")
+
+-- Toggle again should close the terminal window
+local b_ok2, b_err2 = pcall(_G.zenvi.toggle_bottom_panel)
+assert(b_ok2, "toggle_bottom_panel close must not error: " .. tostring(b_err2))
+assert(_G.zenvi.is_bottom_panel_open() == false, "bottom panel terminal should be closed after second toggle")
+
+-- 10. Custom toggle function for bottom panel
+local bottom_custom_called = false
+vim.g.zenvi_toggle_bottom_panel = function()
+    bottom_custom_called = true
+end
+_G.zenvi.toggle_bottom_panel()
+assert(bottom_custom_called == true, "custom vim.g.zenvi_toggle_bottom_panel must be called")
+vim.g.zenvi_toggle_bottom_panel = nil
+
+-- 11. Custom is_open check for bottom panel
+vim.g.zenvi_is_bottom_panel_open = function()
+    return true
+end
+assert(_G.zenvi.is_bottom_panel_open() == true, "custom bottom is_open function must return true")
+vim.g.zenvi_is_bottom_panel_open = nil
+assert(_G.zenvi.is_bottom_panel_open() == false, "bottom panel should be closed after resetting check function")
+
+print("All left, bottom & right panel Lua tests passed!")

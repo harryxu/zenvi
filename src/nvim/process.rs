@@ -242,6 +242,15 @@ impl NvimSession {
                                                     }
                                                 }
                                             }
+                                            "zenvi_bottom_panel_state" => {
+                                                if let Some(open) = params.first().and_then(|v| v.as_bool()) {
+                                                    let mut s = state_clone.write();
+                                                    if s.is_bottom_panel_open != open {
+                                                        s.is_bottom_panel_open = open;
+                                                        let _ = event_tx_clone.send(NvimEvent::Redraw);
+                                                    }
+                                                }
+                                            }
                                             "zenvi_right_panel_state" => {
                                                 if let Some(open) = params.first().and_then(|v| v.as_bool()) {
                                                     let mut s = state_clone.write();

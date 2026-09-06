@@ -266,10 +266,121 @@
         vim.schedule(notify_right_panel_state)
     end
 
+    local function is_bottom_panel_open()
+        if type(vim.g.zenvi_is_bottom_panel_open) == "function" then
+            local ok, res = pcall(vim.g.zenvi_is_bottom_panel_open)
+            if ok then return not not res end
+        elseif type(vim.g.zenvi_is_bottom_panel_open) == "boolean" then
+            return vim.g.zenvi_is_bottom_panel_open
+        end
+
+        if type(_G.zenvi_is_bottom_panel_open) == "function" then
+            local ok, res = pcall(_G.zenvi_is_bottom_panel_open)
+            if ok then return not not res end
+        end
+
+        if type(zenvi.custom_is_bottom_panel_open) == "function" then
+            local ok, res = pcall(zenvi.custom_is_bottom_panel_open)
+            if ok then return not not res end
+        end
+
+        for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+            if vim.api.nvim_win_is_valid(win) then
+                local buf = vim.api.nvim_win_get_buf(win)
+                if vim.api.nvim_buf_is_valid(buf) then
+                    local bt = vim.bo[buf].buftype
+                    local ft = vim.bo[buf].filetype
+                    if bt == "terminal" or ft == "toggleterm" then
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end
+
+    local function notify_bottom_panel_state()
+        local open = is_bottom_panel_open()
+        pcall(vim.rpcnotify, 1, "zenvi_bottom_panel_state", open)
+    end
+
+    local function default_toggle_bottom_panel()
+        local ok_toggleterm, toggleterm = pcall(require, "toggleterm")
+        if ok_toggleterm and toggleterm and type(toggleterm.toggle) == "function" then
+            pcall(toggleterm.toggle, 1, 12, nil, "horizontal")
+            return
+        end
+        if vim.fn.exists(":ToggleTerm") == 2 then
+            pcall(vim.cmd, "ToggleTerm direction=horizontal")
+            return
+        end
+
+        local term_win = nil
+        for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+            if vim.api.nvim_win_is_valid(win) then
+                local buf = vim.api.nvim_win_get_buf(win)
+                if vim.api.nvim_buf_is_valid(buf) then
+                    local bt = vim.bo[buf].buftype
+                    local ft = vim.bo[buf].filetype
+                    if bt == "terminal" or ft == "toggleterm" then
+                        term_win = win
+                        break
+                    end
+                end
+            end
+        end
+
+        if term_win then
+            vim.api.nvim_win_close(term_win, false)
+        else
+            local existing_buf = nil
+            for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+                if vim.api.nvim_buf_is_valid(buf) and vim.bo[buf].buftype == "terminal" then
+                    existing_buf = buf
+                    break
+                end
+            end
+
+            vim.cmd("botright 12split")
+            if existing_buf then
+                vim.api.nvim_win_set_buf(0, existing_buf)
+            else
+                vim.cmd("terminal")
+            end
+            pcall(vim.cmd, "startinsert")
+        end
+    end
+
+    local function toggle_bottom_panel()
+        local custom_fn = nil
+        if type(vim.g.zenvi_toggle_bottom_panel) == "function" then
+            custom_fn = vim.g.zenvi_toggle_bottom_panel
+        elseif type(vim.g.zenvi_toggle_bottom_panel) == "string" then
+            local cmd = vim.g.zenvi_toggle_bottom_panel
+            custom_fn = function() vim.cmd(cmd) end
+        elseif type(_G.zenvi_toggle_bottom_panel) == "function" then
+            custom_fn = _G.zenvi_toggle_bottom_panel
+        elseif type(zenvi.custom_toggle_bottom_panel) == "function" then
+            custom_fn = zenvi.custom_toggle_bottom_panel
+        end
+
+        if custom_fn then
+            pcall(custom_fn)
+        else
+            default_toggle_bottom_panel()
+        end
+
+        vim.schedule(notify_bottom_panel_state)
+    end
+
     zenvi.is_left_panel_open = is_left_panel_open
     zenvi.toggle_left_panel = toggle_left_panel
     zenvi.toggle_panel = toggle_left_panel
     zenvi.notify_left_panel_state = notify_left_panel_state
+
+    zenvi.is_bottom_panel_open = is_bottom_panel_open
+    zenvi.toggle_bottom_panel = toggle_bottom_panel
+    zenvi.notify_bottom_panel_state = notify_bottom_panel_state
 
     zenvi.is_right_panel_open = is_right_panel_open
     zenvi.toggle_right_panel = toggle_right_panel
@@ -278,6 +389,10 @@
     pcall(vim.api.nvim_create_user_command, "ZenviToggleLeftPanel", function()
         zenvi.toggle_left_panel()
     end, { desc = "Toggle Zenvi left panel" })
+
+    pcall(vim.api.nvim_create_user_command, "ZenviToggleBottomPanel", function()
+        zenvi.toggle_bottom_panel()
+    end, { desc = "Toggle Zenvi bottom panel (terminal)" })
 
     pcall(vim.api.nvim_create_user_command, "ZenviToggleRightPanel", function()
         zenvi.toggle_right_panel()
@@ -289,6 +404,7 @@
         callback = function()
             vim.schedule(function()
                 notify_left_panel_state()
+                notify_bottom_panel_state()
                 notify_right_panel_state()
             end)
         end,
@@ -296,6 +412,7 @@
 
     vim.defer_fn(function()
         notify_left_panel_state()
+        notify_bottom_panel_state()
         notify_right_panel_state()
     end, 100)
 end)()

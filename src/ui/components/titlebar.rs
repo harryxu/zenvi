@@ -221,6 +221,7 @@ pub fn render_titlebar(
     style: &TitlebarStyle,
     default_bg: u32,
     is_left_panel_open: bool,
+    is_bottom_panel_open: bool,
     is_right_panel_open: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] is_menu_open: bool,
     #[cfg_attr(target_os = "macos", allow(unused_variables))] borderless: bool,
@@ -256,6 +257,15 @@ pub fn render_titlebar(
             "icons/panel-left-open.svg",
             style,
             |this, cx| this.toggle_left_panel(cx),
+            cx,
+        ))
+        .child(render_panel_toggle_button(
+            "panel-bottom-btn-toggle",
+            is_bottom_panel_open,
+            "icons/panel-bottom.svg",
+            "icons/panel-bottom-open.svg",
+            style,
+            |this, cx| this.toggle_bottom_panel(cx),
             cx,
         ))
         .child(render_panel_toggle_button(

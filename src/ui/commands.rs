@@ -277,6 +277,16 @@ impl ZenviView {
         );
     }
 
+    pub fn toggle_bottom_panel(&mut self, _cx: &mut Context<Self>) {
+        self.session.send_command(
+            r#"lua (function()
+            if _G.zenvi and _G.zenvi.toggle_bottom_panel then
+                _G.zenvi.toggle_bottom_panel()
+            end
+        end)()"#,
+        );
+    }
+
     pub fn toggle_right_panel(&mut self, _cx: &mut Context<Self>) {
         self.session.send_command(
             r#"lua (function()
