@@ -242,6 +242,93 @@ impl NvimSession {
                                                     }
                                                 }
                                             }
+
+                                             "zenvi_statusline_config" => {
+                                                 if let Some(cfg) = params.first().and_then(|v| v.as_map()) {
+                                                     let mut s = state_clone.write();
+                                                     let mut changed = false;
+                                                     for (k, v) in cfg {
+                                                         match k.as_str() {
+                                                             Some("enabled") => {
+                                                                 if let Some(enabled) = v.as_bool() {
+                                                                     if s.delicate_statusline_enabled != enabled {
+                                                                         s.delicate_statusline_enabled = enabled;
+                                                                         changed = true;
+                                                                     }
+                                                                 }
+                                                             }
+                                                             Some("font") => {
+                                                                 if let Some(font_str) = v.as_str() {
+                                                                     if s.delicate_statusline_font != font_str {
+                                                                         s.delicate_statusline_font = font_str.to_string();
+                                                                         changed = true;
+                                                                     }
+                                                                 }
+                                                             }
+                                                             _ => {}
+                                                         }
+                                                     }
+                                                     if changed {
+                                                         let _ = event_tx_clone.send(NvimEvent::Redraw);
+                                                     }
+                                                 }
+                                             }
+                                             "zenvi_statusline_update" => {
+                                                 if let Some(data_map) = params.first().and_then(|v| v.as_map()) {
+                                                     let mut raw_str = String::new();
+                                                     let mut spans = Vec::new();
+
+                                                     for (k, v) in data_map {
+                                                         match k.as_str() {
+                                                             Some("raw_str") => {
+                                                                 if let Some(s) = v.as_str() {
+                                                                     raw_str = s.to_string();
+                                                                 }
+                                                             }
+                                                             Some("spans") => {
+                                                                 if let Some(arr) = v.as_array() {
+                                                                     for span_val in arr {
+                                                                         if let Some(m) = span_val.as_map() {
+                                                                             let mut span = crate::nvim::state::StatuslineSpan::default();
+                                                                             for (sk, sv) in m {
+                                                                                 match sk.as_str() {
+                                                                                     Some("text") => {
+                                                                                         if let Some(t) = sv.as_str() {
+                                                                                             span.text = t.to_string();
+                                                                                         }
+                                                                                     }
+                                                                                     Some("fg") => {
+                                                                                         span.fg = sv.as_u64().map(|c| c as u32);
+                                                                                     }
+                                                                                     Some("bg") => {
+                                                                                         span.bg = sv.as_u64().map(|c| c as u32);
+                                                                                     }
+                                                                                     Some("bold") => {
+                                                                                         span.bold = sv.as_bool().unwrap_or(false);
+                                                                                     }
+                                                                                     Some("italic") => {
+                                                                                         span.italic = sv.as_bool().unwrap_or(false);
+                                                                                     }
+                                                                                     Some("underline") => {
+                                                                                         span.underline = sv.as_bool().unwrap_or(false);
+                                                                                     }
+                                                                                     _ => {}
+                                                                                 }
+                                                                             }
+                                                                             spans.push(span);
+                                                                         }
+                                                                     }
+                                                                 }
+                                                             }
+                                                             _ => {}
+                                                         }
+                                                     }
+
+                                                     let mut s = state_clone.write();
+                                                     s.statusline_data = crate::nvim::state::StatuslineData { raw_str, spans };
+                                                     let _ = event_tx_clone.send(NvimEvent::Redraw);
+                                                 }
+                                             }
                                             "zenvi_bottom_panel_state" => {
                                                 if let Some(open) = params.first().and_then(|v| v.as_bool()) {
                                                     let mut s = state_clone.write();

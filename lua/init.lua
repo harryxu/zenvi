@@ -415,4 +415,214 @@
         notify_bottom_panel_state()
         notify_right_panel_state()
     end, 100)
+
+    -- ==============================================================================
+    -- Delicate Statusline Subsystem
+    -- ==============================================================================
+    local delicate_group = vim.api.nvim_create_augroup("ZenviDelicateStatusline", { clear = true })
+    local delicate_timer = nil
+
+    local function parse_hl_attrs(group)
+        if not group or group == "" then return {} end
+        local ok, h = pcall(vim.api.nvim_get_hl, 0, { name = group, link = false })
+        if not ok or type(h) ~= "table" then return {} end
+        local fg = h.fg
+        local bg = h.bg
+        if h.reverse then
+            fg, bg = bg, fg
+        end
+        return {
+            fg = fg,
+            bg = bg,
+            bold = h.bold or false,
+            italic = h.italic or false,
+            underline = h.underline or false,
+        }
+    end
+
+    local function build_delicate_payload()
+        local win = vim.api.nvim_get_current_win()
+        if not vim.api.nvim_win_is_valid(win) then return nil end
+        local stl = nil
+        if package.loaded["lualine"] then
+            local ok, res = pcall(require("lualine").statusline, true)
+            if ok and type(res) == "string" and res ~= "" then
+                stl = res
+            end
+        end
+        if stl == nil or stl == "" then
+            stl = vim.wo[win].statusline
+        end
+        if stl == nil or stl == "" then
+            stl = vim.go.statusline
+        end
+        if stl == nil or stl == "" then
+            stl = "%<%f %h%m%r%=%-14.(%l,%c%V%) %P"
+        end
+
+        local screen_width = vim.o.columns
+        if screen_width <= 0 then
+            screen_width = vim.api.nvim_win_get_width(win)
+        end
+        if screen_width <= 0 then
+            screen_width = 80
+        end
+
+        local ok, res = pcall(vim.api.nvim_eval_statusline, stl, { winid = win, highlights = true, maxwidth = screen_width })
+        if not ok or not res then
+            return nil
+        end
+
+        local spans = {}
+        local hls = res.highlights or {}
+        local str = res.str or ""
+        local len = #str
+
+        if #hls == 0 then
+            if len > 0 then
+                table.insert(spans, { text = str })
+            end
+        else
+            if hls[1].start > 0 then
+                table.insert(spans, { text = string.sub(str, 1, hls[1].start) })
+            end
+            for i = 1, #hls do
+                local start_pos = hls[i].start + 1
+                local end_pos = (i < #hls) and hls[i+1].start or len
+                if start_pos <= end_pos and start_pos <= len then
+                    local text = string.sub(str, start_pos, end_pos)
+                    local attrs = parse_hl_attrs(hls[i].group)
+                    attrs.text = text
+                    table.insert(spans, attrs)
+                end
+            end
+        end
+
+        return {
+            raw_str = str,
+            spans = spans,
+        }
+    end
+
+    local function send_statusline_update()
+        delicate_timer = nil
+        local enabled = vim.g.zenvi_delicate_statusline
+        if enabled == false or enabled == 0 then
+            return
+        end
+        local ok, payload = pcall(build_delicate_payload)
+        if ok and payload then
+            pcall(vim.rpcnotify, 1, "zenvi_statusline_update", payload)
+        end
+    end
+
+    local function trigger_statusline_update(immediate)
+        local enabled = vim.g.zenvi_delicate_statusline
+        if enabled == false or enabled == 0 then
+            return
+        end
+        if immediate then
+            if delicate_timer then
+                pcall(function()
+                    delicate_timer:stop()
+                    delicate_timer:close()
+                end)
+                delicate_timer = nil
+            end
+            send_statusline_update()
+        else
+            if not delicate_timer then
+                delicate_timer = vim.defer_fn(send_statusline_update, 16)
+            end
+        end
+    end
+
+    local function enforce_laststatus()
+        local enabled = vim.g.zenvi_delicate_statusline
+        if enabled == nil or enabled == true or enabled == 1 then
+            if vim.o.laststatus ~= 0 then
+                vim.o.laststatus = 0
+            end
+        end
+    end
+
+    local function notify_delicate_config()
+        local enabled = vim.g.zenvi_delicate_statusline
+        if enabled == nil then
+            enabled = true
+        elseif enabled == 0 or enabled == false then
+            enabled = false
+        else
+            enabled = true
+        end
+
+        local font = vim.g.zenvi_delicate_statusline_font or ""
+
+        if enabled then
+            enforce_laststatus()
+        end
+
+        pcall(vim.rpcnotify, 1, "zenvi_statusline_config", {
+            enabled = enabled,
+            font = font,
+        })
+
+        if enabled then
+            trigger_statusline_update(true)
+        end
+    end
+
+    -- Hook statusline autocmds
+    vim.api.nvim_create_autocmd({
+        "UIEnter", "VimEnter", "BufEnter", "WinEnter", "BufWritePost", "ModeChanged",
+        "DiagnosticChanged", "VimResized", "ColorScheme", "TermEnter", "TermLeave",
+        "SessionLoadPost", "FileType"
+    }, {
+        group = delicate_group,
+        callback = function()
+            enforce_laststatus()
+            trigger_statusline_update(true)
+        end,
+    })
+
+    vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+        group = delicate_group,
+        callback = function()
+            trigger_statusline_update(false)
+        end,
+    })
+
+    vim.api.nvim_create_autocmd("OptionSet", {
+        group = delicate_group,
+        pattern = "laststatus",
+        callback = function()
+            local enabled = vim.g.zenvi_delicate_statusline
+            if (enabled == nil or enabled == true or enabled == 1) and vim.o.laststatus ~= 0 then
+                vim.schedule(function()
+                    enforce_laststatus()
+                end)
+            end
+            trigger_statusline_update(true)
+        end,
+    })
+
+    vim.api.nvim_create_autocmd("OptionSet", {
+        group = delicate_group,
+        pattern = "statusline",
+        callback = function()
+            trigger_statusline_update(true)
+        end,
+    })
+
+    zenvi.notify_delicate_config = notify_delicate_config
+    zenvi.trigger_statusline_update = trigger_statusline_update
+    zenvi.enforce_laststatus = enforce_laststatus
+
+    -- Run initial enforcement across startup intervals to override lazy-loaded plugins (like lualine)
+    for _, delay in ipairs({ 10, 50, 150, 300, 600, 1200 }) do
+        vim.defer_fn(function()
+            enforce_laststatus()
+            notify_delicate_config()
+        end, delay)
+    end
 end)()

@@ -1,3 +1,4 @@
+pub mod delicate_statusline;
 pub mod grid;
 pub mod style;
 pub mod titlebar;

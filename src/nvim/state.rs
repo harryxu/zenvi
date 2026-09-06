@@ -467,6 +467,22 @@ impl Default for ModeInfo {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StatuslineSpan {
+    pub text: String,
+    pub fg: Option<u32>,
+    pub bg: Option<u32>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StatuslineData {
+    pub raw_str: String,
+    pub spans: Vec<StatuslineSpan>,
+}
+
 #[derive(Debug)]
 pub struct NvimState {
     pub default_fg: u32,
@@ -492,6 +508,12 @@ pub struct NvimState {
     pub is_bottom_panel_open: bool,
     /// Indicates whether the Neovim right panel (e.g. custom panel) is currently open.
     pub is_right_panel_open: bool,
+    /// Indicates whether the delicate_statusline component is enabled. Defaults to true.
+    pub delicate_statusline_enabled: bool,
+    /// Custom font specification for delicate_statusline in guifont format (e.g. "SF Pro:h16").
+    pub delicate_statusline_font: String,
+    /// Parsed statusline segments received from Neovim.
+    pub statusline_data: StatuslineData,
 }
 
 impl NvimState {
@@ -536,6 +558,9 @@ impl Default for NvimState {
             is_left_panel_open: false,
             is_bottom_panel_open: false,
             is_right_panel_open: false,
+            delicate_statusline_enabled: true,
+            delicate_statusline_font: String::new(),
+            statusline_data: StatuslineData::default(),
         }
     }
 }
@@ -724,5 +749,36 @@ mod tests {
         grid.scroll(0, 100, 0, 100, 1);
         // After scrolling 1 row up on 4x4, row 0 becomes row 1 (which was default)
         assert_eq!(grid.get_cell(0, 0).unwrap(), &Cell::default());
+    }
+
+    #[test]
+    fn test_statusline_data_default_and_custom() {
+        let mut data = StatuslineData::default();
+        assert!(data.spans.is_empty());
+        assert!(data.raw_str.is_empty());
+
+        data.raw_str = "main [utf-8] 12:34".to_string();
+        data.spans.push(StatuslineSpan {
+            text: "main".to_string(),
+            fg: Some(0x00ff00),
+            bg: Some(0x111111),
+            bold: true,
+            italic: false,
+            underline: false,
+        });
+        data.spans.push(StatuslineSpan {
+            text: " [utf-8] 12:34".to_string(),
+            fg: None,
+            bg: None,
+            bold: false,
+            italic: true,
+            underline: false,
+        });
+
+        assert_eq!(data.spans.len(), 2);
+        assert_eq!(data.spans[0].text, "main");
+        assert!(data.spans[0].bold);
+        assert_eq!(data.spans[0].fg, Some(0x00ff00));
+        assert!(data.spans[1].italic);
     }
 }

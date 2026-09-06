@@ -84,7 +84,7 @@ pub struct ZenviView {
 impl ZenviView {
     #[allow(dead_code)]
     pub fn new(window_handle: AnyWindowHandle, cx: &mut Context<Self>) -> Self {
-        Self::with_cwd_and_targets(window_handle, None, Vec::new(), false, cx)
+        Self::with_cwd_and_targets(window_handle, None, Vec::new(), false, true, cx)
     }
 
     #[allow(dead_code)]
@@ -93,7 +93,7 @@ impl ZenviView {
         cwd: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::with_cwd_and_targets(window_handle, cwd, Vec::new(), false, cx)
+        Self::with_cwd_and_targets(window_handle, cwd, Vec::new(), false, true, cx)
     }
 
     pub fn with_cwd_and_targets(
@@ -101,6 +101,7 @@ impl ZenviView {
         cwd: Option<PathBuf>,
         targets: Vec<PathBuf>,
         borderless: bool,
+        delicate_statusline: bool,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
@@ -113,6 +114,14 @@ impl ZenviView {
                 std::process::exit(1);
             }
         };
+
+        if delicate_statusline {
+            session.send_command("set laststatus=0");
+            session.send_command("let g:zenvi_delicate_statusline = v:true");
+        } else {
+            session.state.write().delicate_statusline_enabled = false;
+            session.send_command("let g:zenvi_delicate_statusline = v:false");
+        }
 
         let font_family = resolve_default_font_family(cx);
         let font_size = px(14.0);
@@ -128,6 +137,9 @@ impl ZenviView {
 
         // Initial attach with 100x35
         session.attach_ui(100, 35);
+        if delicate_statusline {
+            session.send_command("set laststatus=0");
+        }
         session.send_command("set mouse=a");
         session.send_command("set title");
         session.send_command(&format!(
@@ -385,13 +397,24 @@ impl Render for ZenviView {
         let window_h: f32 = viewport.height.into();
         let content_w = (window_w - shadow_f32 * 2.0).max(100.0);
         let content_h = (window_h - shadow_f32 * 2.0).max(100.0);
+        let delicate_statusline_enabled = state.delicate_statusline_enabled;
+        let (statusline_family, statusline_size_opt) =
+            font::parse_single_guifont(&state.delicate_statusline_font);
+        let statusline_font_family = statusline_family.unwrap_or_else(|| self.font_family.clone());
+        let statusline_font_size = px(statusline_size_opt.unwrap_or(16.0));
+        let sz: f32 = statusline_font_size.into();
+        let statusline_h_val = if delicate_statusline_enabled {
+            (sz * 1.5).round().max(24.0)
+        } else {
+            0.0
+        };
+        let statusline_height = px(statusline_h_val);
         let lh: f32 = self.line_height.into();
-
         let horizontal_padding = GRID_PADDING_LEFT * 2.0 + 4.0;
         let cols = ((content_w - horizontal_padding) / self.char_width)
             .floor()
             .max(20.0) as usize;
-        let rows = ((content_h - TOP_OFFSET) / lh).floor().max(5.0) as usize;
+        let rows = ((content_h - TOP_OFFSET - statusline_h_val) / lh).floor().max(5.0) as usize;
 
         // Notify Neovim of resize with 30ms throttling (Leading + Trailing edge)
         // Prevents flooding Neovim with full-screen layout recalculations during rapid drags,
@@ -527,11 +550,31 @@ impl Render for ZenviView {
                     .pt(px(GRID_PADDING_TOP))
                     .pl(px(GRID_PADDING_LEFT))
                     .overflow_hidden()
-                    .when(self.borderless && !is_maximized, |d| {
+                    .when(self.borderless && !is_maximized && !delicate_statusline_enabled, |d| {
                         d.rounded_b(px(10.0))
                     })
                     .child(grid_element),
-            );
+            )
+            .when(delicate_statusline_enabled, |d| {
+                d.child(
+                    div()
+                        .when(self.borderless && !is_maximized, |d| {
+                            d.rounded_b(px(10.0))
+                        })
+                        .overflow_hidden()
+                        .on_mouse_down(MouseButton::Left, cx.listener(|_this, _, _window, cx| {
+                            cx.stop_propagation();
+                        }))
+                        .child(components::delicate_statusline::render_delicate_statusline(
+                            &state.statusline_data,
+                            state.default_fg,
+                            state.default_bg,
+                            &statusline_font_family,
+                            statusline_font_size,
+                            statusline_height,
+                        )),
+                )
+            });
 
         #[cfg(not(target_os = "macos"))]
         let inner = if self.is_menu_open {
