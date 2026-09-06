@@ -404,7 +404,7 @@ impl Render for ZenviView {
         let statusline_font_size = px(statusline_size_opt.unwrap_or(16.0));
         let sz: f32 = statusline_font_size.into();
         let statusline_h_val = if delicate_statusline_enabled {
-            (sz * 1.5).round().max(24.0)
+            (sz * 1.5).round().max(12.0)
         } else {
             0.0
         };
