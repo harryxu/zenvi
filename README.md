@@ -68,6 +68,19 @@ cargo build --release
 ```bash
 # Build Zenvi.app bundle in target/Zenvi.app
 make macapp
+
+# Build macOS .dmg installer in target/
+make dmg
+```
+
+### Packaging Linux (`.tar.gz` & `.AppImage`)
+
+```bash
+# Build standalone Linux AppImage in target/
+make appimage
+
+# Or build both .tar.gz bundle and .AppImage
+make linux
 ```
 
 

@@ -6,7 +6,8 @@
 	dmg-arm \
 	dmg-intel \
 	dmg-all \
-	linux
+	linux \
+	appimage
 
 # macOS App Bundle (.app) targets
 macapp:
@@ -31,6 +32,9 @@ dmg-intel:
 dmg-all:
 	./packaging/macos/bundle_dmg.sh all
 
-# Linux bundle target
+# Linux bundle targets
 linux:
 	./packaging/linux/bundle_linux.sh
+
+appimage:
+	./packaging/linux/bundle_appimage.sh

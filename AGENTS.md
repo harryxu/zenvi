@@ -31,8 +31,8 @@
 │   ├── zenvi-icon.svg       # Master app icon SVG asset
 │   └── icons/               # Runtime UI vector icons (menu.svg, etc.)
 ├── packaging/               # Platform-specific packaging scripts, metadata & generated bundles
-│   ├── macos/               # macOS Info.plist, AppIcon.icns, bundle_macos.sh
-│   └── linux/               # Linux desktop entry, hicolor desktop icons, bundle_linux.sh
+│   ├── macos/               # macOS Info.plist, AppIcon.icns, bundle_macos.sh, bundle_dmg.sh
+│   └── linux/               # Linux desktop entry, hicolor icons, install/uninstall scripts, bundle_linux.sh, bundle_appimage.sh
 └── src/
     ├── main.rs              # App entry point, GPUI Application lifecycle & Tokio runtime initialization
     ├── actions.rs           # Centralized GPUI Action definitions (Quit, OpenFile, OpenFolder, OpenConfig, etc.)
