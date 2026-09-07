@@ -61,6 +61,7 @@ chmod +x "${BUNDLE_DIR}/uninstall.sh"
 echo "=== [4/6] Creating Compressed Archive (.tar.gz) ==="
 TAR_OUTPUT="${TARGET_DIR}/${PACKAGE_NAME}.tar.gz"
 tar -czf "${TAR_OUTPUT}" -C "${TARGET_DIR}" "${PACKAGE_NAME}"
+(cd "${TARGET_DIR}" && sha256sum "${PACKAGE_NAME}.tar.gz" > "${PACKAGE_NAME}.tar.gz.sha256")
 
 echo "=== [5/6] Packaging AppImage Format ==="
 "${SCRIPT_DIR}/bundle_appimage.sh"
