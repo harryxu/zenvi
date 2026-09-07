@@ -4,7 +4,6 @@ use gpui::*;
 pub struct TitlebarStyle {
     pub title_color: Rgba,
     pub border_color: Rgba,
-    #[cfg(not(target_os = "macos"))]
     pub menu_hover_bg: Rgba,
     #[cfg(not(target_os = "macos"))]
     pub menu_active_bg: Rgba,
@@ -51,7 +50,6 @@ pub fn derive_titlebar_style(default_bg: u32, default_fg: u32) -> TitlebarStyle 
         ))
     };
 
-    #[cfg(not(target_os = "macos"))]
     let menu_hover_bg = if is_dark {
         rgb(pack_rgb(
             (bg_r + 20.0).min(255.0),
@@ -106,7 +104,6 @@ pub fn derive_titlebar_style(default_bg: u32, default_fg: u32) -> TitlebarStyle 
     TitlebarStyle {
         title_color,
         border_color,
-        #[cfg(not(target_os = "macos"))]
         menu_hover_bg,
         #[cfg(not(target_os = "macos"))]
         menu_active_bg,
