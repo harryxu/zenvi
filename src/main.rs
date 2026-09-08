@@ -40,12 +40,12 @@ fn main() {
         });
 
         cx.on_action(|_: &NewWindow, cx: &mut App| {
-            window::open_zenvi_window(None, Vec::new(), false, true, cx);
+            window::open_zenvi_window(None, Vec::new(), true, true, cx);
         });
 
         cx.on_action(|_: &OpenConfig, cx: &mut App| {
             let (config_dir, target_file) = window::get_nvim_config_file();
-            window::open_zenvi_window(Some(config_dir), vec![target_file], false, true, cx);
+            window::open_zenvi_window(Some(config_dir), vec![target_file], true, true, cx);
         });
 
         cx.on_action(|_: &InstallCli, _cx: &mut App| {
@@ -90,7 +90,7 @@ fn main() {
                                 } else {
                                     paths[0].parent().map(|p| p.to_path_buf())
                                 };
-                                window::open_zenvi_window(cwd, paths, false, true, cx);
+                                window::open_zenvi_window(cwd, paths, true, true, cx);
                             }
                         });
                     }

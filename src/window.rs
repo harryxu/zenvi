@@ -72,7 +72,7 @@ pub fn get_safe_default_dir() -> Option<PathBuf> {
 pub struct CliLaunchConfig {
     pub cwd: Option<PathBuf>,
     pub targets: Vec<PathBuf>,
-    /// Remove OS-provided window decorations (border + titlebar). Linux only.
+    /// Remove OS-provided window decorations (border + titlebar). Linux only. Defaults to true.
     pub borderless: bool,
     /// Whether the delicate_statusline is enabled. Defaults to true.
     pub delicate_statusline: bool,
@@ -83,7 +83,7 @@ impl Default for CliLaunchConfig {
         Self {
             cwd: None,
             targets: Vec::new(),
-            borderless: false,
+            borderless: true,
             delicate_statusline: true,
         }
     }
@@ -95,7 +95,7 @@ where
     S: AsRef<str>,
 {
     let mut targets = Vec::new();
-    let mut borderless = false;
+    let mut borderless = true;
     let mut delicate_statusline = true;
 
     for arg in args {
@@ -104,7 +104,11 @@ where
             // Ignore macOS Finder process serial number
             continue;
         }
-        if s == "--no-titlebar" || s == "-B" {
+        if s == "--borderless=false" {
+            borderless = false;
+            continue;
+        }
+        if s == "--borderless" || s == "--borderless=true" {
             borderless = true;
             continue;
         }
@@ -274,6 +278,7 @@ mod tests {
         assert_eq!(config.targets.len(), 2);
         assert_eq!(config.targets[0], cwd.join("src/main.rs"));
         assert_eq!(config.targets[1], cwd.join("README.md"));
+        assert!(config.borderless);
     }
 
     #[test]
@@ -285,26 +290,34 @@ mod tests {
         assert_eq!(config.cwd, Some(cwd.clone()));
         assert_eq!(config.targets.len(), 1);
         assert_eq!(config.targets[0], cwd.join("."));
-        assert!(!config.borderless);
+        assert!(config.borderless);
     }
 
     #[test]
     fn test_parse_cli_args_borderless_flags() {
         let cwd = PathBuf::from("/Users/test/workspace");
-        let config1 = parse_cli_args(vec!["--no-titlebar", "main.rs"], Some(cwd.clone()));
-        assert!(config1.borderless);
-        assert!(config1.delicate_statusline);
-        assert_eq!(config1.targets.len(), 1);
 
-        let config2 = parse_cli_args(vec!["-B", "src/lib.rs"], Some(cwd.clone()));
-        assert!(config2.borderless);
-        assert!(config2.delicate_statusline);
-        assert_eq!(config2.targets.len(), 1);
+        // Defaults to borderless
+        let config_default = parse_cli_args(vec!["main.rs"], Some(cwd.clone()));
+        assert!(config_default.borderless);
+        assert_eq!(config_default.targets.len(), 1);
 
-        let config3 = parse_cli_args(vec!["--no-delicate-statusline", "file.txt"], Some(cwd.clone()));
-        assert!(!config3.borderless);
-        assert!(!config3.delicate_statusline);
-        assert_eq!(config3.targets.len(), 1);
+        // Explicit enable
+        let config_flag = parse_cli_args(vec!["--borderless", "main.rs"], Some(cwd.clone()));
+        assert!(config_flag.borderless);
+
+        let config_true = parse_cli_args(vec!["--borderless=true", "main.rs"], Some(cwd.clone()));
+        assert!(config_true.borderless);
+
+        // Explicit disable
+        let config_false = parse_cli_args(vec!["--borderless=false", "main.rs"], Some(cwd.clone()));
+        assert!(!config_false.borderless);
+        assert_eq!(config_false.targets.len(), 1);
+
+        let config_delicate = parse_cli_args(vec!["--borderless=false", "--no-delicate-statusline", "file.txt"], Some(cwd.clone()));
+        assert!(!config_delicate.borderless);
+        assert!(!config_delicate.delicate_statusline);
+        assert_eq!(config_delicate.targets.len(), 1);
     }
 
     #[test]
